@@ -1,5 +1,6 @@
 *.out
 *.o
+*.log
 data/
 lib/
 lib
