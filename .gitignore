@@ -2,4 +2,5 @@
 *.o
 data/
 lib/
+lib
 .vscode
