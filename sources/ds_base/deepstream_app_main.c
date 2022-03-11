@@ -103,9 +103,12 @@ all_bbox_generated (AppCtx * appCtx, GstBuffer * buf,
   for (NvDsMetaList * l_frame = batch_meta->frame_meta_list; l_frame != NULL;
       l_frame = l_frame->next) {
     NvDsFrameMeta *frame_meta = l_frame->data;
+    
+    printf("Frame %d\n", (int)frame_meta->frame_num);   //d_
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL;
         l_obj = l_obj->next) {
-      NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
+      NvDsObjectMeta *obj = (NvDsObje
+      ctMeta *) l_obj->data;
       if (obj->unique_component_id ==
           (gint) appCtx->config.primary_gie_config.unique_id) {
         if (obj->class_id >= 0 && obj->class_id < 128) {

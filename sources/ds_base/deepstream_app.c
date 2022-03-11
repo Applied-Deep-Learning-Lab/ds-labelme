@@ -24,6 +24,7 @@
 #include <string.h>
 #include <math.h>
 #include <stdlib.h>
+//#include <time.h>
 //#include <vector>
 #include "deepstream_app.h"
 //#include "../SamplePocoClient/DeepStreamSender.h"
@@ -190,7 +191,34 @@ void printFrameBboxes(NvDsFrameMeta *frame_meta, AppCtx *appCtx){
 
 }
 
+// Works
+void timestamp_to_str1(char *buffer1, int bufferSize, uint32_t  timestamp) 
+{   
+    struct tm *t;
+    char buffer[20];
+    long int tmp = timestamp;
+    t = gmtime(&tmp);
+    strftime(buffer1, bufferSize, "%F %T", t);
+}
+
+// Segmentation fault without / 1000000000
+void timestamp_to_str(char *buffer, int bufferSize, uint64_t  timestamp) 
+{
+    struct tm *t;
+    long int tmp = timestamp / 1000000000;
+    t = gmtime(&tmp);
+    strftime(buffer, bufferSize, "%F %T", t);
+    if (strlen(buffer) < bufferSize - 5)
+		sprintf(buffer + strlen(buffer), ".%03d", (timestamp / 1000000) % 1000);
+}
 void Bbox_counter(NvDsFrameMeta *frame_meta, AppCtx *appCtx){
+	// char buffer[100];
+	
+	// timestamp_to_str(&(buffer[0]), sizeof(buffer), frame_meta->ntp_timestamp);
+	// printf("Frame %d, %s (%lu)\n", (int)frame_meta->frame_num, 
+	//  		buffer, frame_meta->ntp_timestamp);   //d_
+
+
 	static int counter_last_id = -1;
 	static float bottom = 0;
 	int last_id, count = 1;
