@@ -20,7 +20,7 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-CUDA_VER?=
+CUDA_VER=10.2
 ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif 
@@ -46,7 +46,7 @@ SRCS:= deepstream_transfer_learning_app_main.cpp image_meta_consumer.cpp image_m
 SRCS+= client/client.cpp
 SRCS+= base64/base64.cpp
 SRCS+= ds_base/deepstream_app.c ds_base/deepstream_app_config_parser.c
-SRCS+= $(wildcard lib/includes/apps-common/src/*.c)
+SRCS+= $(wildcard ../lib/includes/apps-common/src/*.c)
 
 
 INCS:= $(wildcard *.h)
@@ -55,8 +55,8 @@ PKGS:= gstreamer-1.0 gstreamer-video-1.0 x11 json-glib-1.0
 
 OBJS:= $(patsubst %.c,%.o, $(patsubst %.cpp,%.o, $(SRCS)))
 
-CFLAGS+= -I lib/includes/apps-common/includes \
-		 -I lib/includes/includes \
+CFLAGS+= -I ../lib/includes/apps-common/includes \
+		 -I ../lib/includes/includes \
 		 -I ds_base/ -DDS_VERSION_MINOR=0 -DDS_VERSION_MAJOR=5 \
 		 -I /usr/local/cuda-$(CUDA_VER)/include \
 		 -I /usr/include/opencv4
@@ -73,13 +73,13 @@ LIBS+= $(shell pkg-config --libs $(PKGS))
 all: $(APP)
 
 %.o: %.c $(INCS) Makefile
-	$(CC) -c -o $@ $(CFLAGS) $<
+	$(CC) -g -c -o $@ $(CFLAGS) $<
 
 %.o: %.cpp $(INCS) Makefile
-	$(CXX) -c -o $@ $(CFLAGS) $<
+	$(CXX) -g -c -o $@ $(CFLAGS) $<
 
 $(APP): $(OBJS) Makefile
-	$(CXX) -o $(APP) $(OBJS) $(LIBS)
+	$(CXX) -g -o $(APP) $(OBJS) $(LIBS)
 
 install: $(APP)
 	cp -rv $(APP) $(APP_INSTALL_DIR)
