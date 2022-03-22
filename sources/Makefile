@@ -20,7 +20,7 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-CUDA_VER=10.2
+CUDA_VER=11.4
 ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif 
@@ -59,7 +59,6 @@ CFLAGS+= -I ../lib/includes/apps-common/includes \
 		 -I ../lib/includes/includes \
 		 -I ds_base/ -DDS_VERSION_MINOR=0 -DDS_VERSION_MAJOR=5 \
 		 -I /usr/local/cuda-$(CUDA_VER)/include \
-		 -I /usr/include/opencv4
 
 LIBS:= -L/usr/local/cuda-$(CUDA_VER)/lib64/ -lcudart -lstdc++fs
 

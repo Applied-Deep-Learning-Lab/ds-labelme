@@ -1,7 +1,8 @@
 {
     "makefile.extensionOutputFolder": "./.vscode",
     "files.associations": {
-        "chrono": "cpp"
+        "chrono": "cpp",
+        "gst.h": "c"
     },
     "makefile.makeDirectory": "sources/",
     "makefile.dryrunSwitches": [
@@ -12,9 +13,12 @@
     ],
     "makefile.launchConfigurations": [
         {
-            "cwd": "/home/jetson/ProgriX/DS_LabelMeProject/v1",
-            "binaryPath": "/home/jetson/ProgriX/DS_LabelMeProject/v1/ds_v1.out",
-            "binaryArgs": [ "-c", "configs/deepstream_app_config.txt"]
+            "cwd": "/root/ProgriX/projects/ds-labelme/",
+            "binaryPath": "/root/ProgriX/projects/ds-labelme/ds_v1.out",
+            "binaryArgs": [
+                "-c",
+                "configs/deepstream_app_config.txt"
+            ]
         }
     ]
 }

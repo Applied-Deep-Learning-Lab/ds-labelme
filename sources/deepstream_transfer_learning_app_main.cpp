@@ -222,15 +222,6 @@ static bool save_image(const std::string &path,
     unsigned int dataSize = imageData.dataend - imageData.datastart;
     auto cdata = base64_encode(data, dataSize);
     imageSender.addMeta("imageData", cdata);
-
-
-    // int plane = 0;
-    // NvBufSurfaceMap(ip_surf, 0, -1, NVBUF_MAP_READ);
-    // uchar* nvbuf = (uchar*)ip_surf->surfaceList[0].mappedAddr.addr[plane];
-    // cv::Mat out(ip_surf->surfaceList[0].planeParams.height[plane], ip_surf->surfaceList[0].planeParams.width[plane], CV_8UC1);
-    // out.data = nvbuf;//(uchar*)(void*)dec0.c_str();
-    // SaveFrame((uint8_t*)ip_surf->surfaceList[0].mappedAddr.addr[0], (uint8_t*)ip_surf->surfaceList[0].mappedAddr.addr[1], 0);
-    // cv::imwrite("mem4.png", out);
     
     imageSender.blockingMode();
     imageSender.sendMessage();
@@ -367,7 +358,7 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
                 break;
             }
         }
-
+        
         initOnFirst();
         sendSimpleJson(ip_surf, frame_meta);
 
