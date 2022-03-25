@@ -316,6 +316,7 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         return;
     }
     NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
+
     gst_buffer_unmap(buf, &inmap);
 
     /// Creating an ImageMetaProducer and registering a consumer.
@@ -327,94 +328,33 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
          l_frame = l_frame->next) {
         NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
         unsigned source_number = frame_meta->pad_index;
-        if (g_img_meta_consumer.should_save_data(source_number)) {
-            g_img_meta_consumer.lock_source_nb(source_number);
-            if (!g_img_meta_consumer.should_save_data(source_number)) {
-                g_img_meta_consumer.unlock_source_nb(source_number);
-                continue;
-            }
-        } else
-            continue;
-
+        
+        g_img_meta_consumer.lock_source_nb(source_number);
 
         /// required for `get_save_full_frame_enabled()`
-        std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        std::ostringstream oss;
-        oss << std::put_time(std::localtime(&t), "%FT%T%z");
-        img_producer.generate_image_full_frame_path(frame_meta->pad_index, oss.str());
-        bool at_least_one_metadata_saved = false;
-        bool full_frame_written = false;
+        // std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        // std::ostringstream oss;
+        // oss << std::put_time(std::localtime(&t), "%FT%T%z");
+        // img_producer.generate_image_full_frame_path(frame_meta->pad_index, "tmp.jpg");
         unsigned obj_counter = 0;
 
-        bool at_least_one_confidence_is_within_range = false;
-        /// first loop to check if it is usefull to save metadata for the current frame
-        for (NvDsMetaList *l_obj = frame_meta->obj_meta_list; l_obj != nullptr;
-             l_obj = l_obj->next) {
-            NvDsObjectMeta *obj_meta = static_cast<NvDsObjectMeta *>(l_obj->data);
-            display_bad_confidence(obj_meta->confidence);
-            if (obj_meta_is_within_confidence(obj_meta)
-                && obj_meta_box_is_above_minimum_dimension(obj_meta)) {
-                at_least_one_confidence_is_within_range = true;
-                break;
-            }
-        }
         
         initOnFirst();
         sendSimpleJson(ip_surf, frame_meta);
 
-        // if(!at_least_one_confidence_is_within_range) {
-        //     unsigned dummy_counter = 0;
-        //     static NvDsObjectMeta dummy_obj_meta;
-        //     dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
-        //     dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
-        //     dummy_obj_meta.rect_params.top = 0;
-        //     dummy_obj_meta.rect_params.left = 0;
-        //     save_image("empty", ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
-        // }
 
-        if(at_least_one_confidence_is_within_range) {
-            for (NvDsMetaList *l_obj = frame_meta->obj_meta_list; l_obj != nullptr;
-                 l_obj = l_obj->next) {
-                NvDsObjectMeta *obj_meta = static_cast<NvDsObjectMeta *>(l_obj->data);
-                if (!obj_meta_is_above_min_confidence(obj_meta)
-                    || !obj_meta_box_is_above_minimum_dimension(obj_meta))
-                    continue;
+        unsigned dummy_counter = 0;
+        static NvDsObjectMeta dummy_obj_meta;
+        dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
+        dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
+        dummy_obj_meta.rect_params.top = 0;
+        dummy_obj_meta.rect_params.left = 0;
+        save_image("data/images/tmp.jpg", ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
+        
 
-                ImageMetaProducer::IPData ipdata = make_ipdata(appCtx, frame_meta, obj_meta);
-
-                /// Store temporally information about the current object in the producer
-                bool data_was_stacked = img_producer.stack_obj_data(ipdata);
-                /// Save a cropped image if the option was enabled
-                if (data_was_stacked && g_img_meta_consumer.get_save_cropped_images_enabled())
-                    at_least_one_image_saved |= save_image(ipdata.image_cropped_obj_path_saved,
-                                                           ip_surf, obj_meta, frame_meta, obj_counter);
-                if (data_was_stacked && !full_frame_written
-                    && g_img_meta_consumer.get_save_full_frame_enabled()) {
-                    unsigned dummy_counter = 0;
-                    /// Creating a special object meta in order to save a full frame
-                    NvDsObjectMeta dummy_obj_meta;
-                    dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
-                    dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
-                    dummy_obj_meta.rect_params.top = 0;
-                    dummy_obj_meta.rect_params.left = 0;
-                    at_least_one_image_saved |= save_image(img_producer.get_image_full_frame_path_saved(),
-                                                           ip_surf, &dummy_obj_meta, frame_meta, dummy_counter);
-                    full_frame_written = true;
-                }
-                at_least_one_metadata_saved |= data_was_stacked;
-            }
-        }
-        /// Send information contained in the producer and empty it.
-        if(at_least_one_metadata_saved) {
-            img_producer.send_and_flush_obj_data();
-            g_img_meta_consumer.data_was_saved_for_source(source_number);
-        }
+        
         g_img_meta_consumer.unlock_source_nb(source_number);
     }
-    /// Wait for all the thread writing jpg files to be finished. (joining a thread list)
-    if (at_least_one_image_saved)
-        nvds_obj_enc_finish(g_img_meta_consumer.get_obj_ctx_handle());
-
 }
 
 /**
