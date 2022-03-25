@@ -415,7 +415,6 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
     if (at_least_one_image_saved)
         nvds_obj_enc_finish(g_img_meta_consumer.get_obj_ctx_handle());
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
 }
 
 /**
