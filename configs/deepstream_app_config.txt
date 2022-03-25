@@ -124,7 +124,7 @@ print-bbox=1
 [streammux]
 live-source=1
 #attach-sys-ts=1
-attach-sys-ts-as-ntp=0
+attach-sys-ts-as-ntp=1
 batch-size=1
 batched-push-timeout=40000
 width=1920

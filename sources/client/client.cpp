@@ -9,16 +9,21 @@
 #include <fstream>
 #include <iostream>
 #include <ctime>
+#include <chrono>
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <unistd.h>
 
 #include "client.h"
 
 #include "nvdsinfer_custom_impl.h"
 
+#define CONNECTION_LOST 0
+#define ORDER_EMPTY -1
 
-
+#define MAX_REPLY_SIZE 200
+#define RECONNECT_TIME_MILLISECONDS 1000
 
 
 using namespace std;
@@ -32,35 +37,22 @@ Client::Client(std::string configPath)
 
     _connected = false;
 
+
     if (!configFile)
     {
-        perror( "No \"ip.config\" file" );
+        cerr << "No \"ip.config\" file" << endl;
         return;
     }
-    string ip;
-    int port;
-
     
-
-    getline(configFile, ip, ':');
-    configFile >> port;
-    cout << "Connect to host " << ip << ":" << port << endl;
-    /*объявляем сокет*/
-    _socket = socket( AF_INET, SOCK_STREAM, 0 );
-    if(_socket < 0)
-    {
-            perror( "Error calling socket" );
-            return;
-    }
-
-    /*соединяемся по определённому порту с хостом*/
-    _host.sin_family = AF_INET;
-    _host.sin_port = htons(port);
-    _host.sin_addr.s_addr = inet_addr(ip.c_str());
+    getline(configFile, _ip, ':');
+    configFile >> _port;
     
-    _flags = fcntl(_socket , F_GETFL, 0);
 
     return;
+}
+
+Client::~Client(){
+    close(_socket);
 }
 
 void Client::blockingMode(){
@@ -77,52 +69,92 @@ void Client::streamMode(){
 }
 
 void Client::connectToHost(){
+    
+    _socket = socket( AF_INET, SOCK_STREAM, 0 );
+    if(_socket < 0)
+    {
+            perror( "Error calling socket" );
+            return;
+    }
+
+    /*соединяемся по определённому порту с хостом*/
+    _host.sin_family = AF_INET;
+    _host.sin_port = htons(_port);
+    _host.sin_addr.s_addr = inet_addr(_ip.c_str());
+    
+    _flags = fcntl(_socket , F_GETFL, 0);
+
+    _lastConnectTime = std::chrono::steady_clock::now();
     int result = connect( _socket, ( struct sockaddr * )&_host, sizeof( _host ) );
     if( result )
     {
-            perror( "Error calling connect" );
             return;
     }
     _connected = true;
+    cout << "Connected (" << _ip << ":" << _port << ")" << endl;
     
 }
 
 int Client::imageRequest(){
-    char server_reply[200];
-    // if( recv(_socket, server_reply , 6000 , 0) < 0)
-	// {
-	// 	puts("recv failed");
-	// }
+    char server_reply[MAX_REPLY_SIZE];
 
-    int len = recv(_socket, server_reply , 200 , 0);
-    if(len <= 0){
+    if(!_connected){
         return -1;
     }
 
+    int result = recv(_socket, server_reply , MAX_REPLY_SIZE - 1 , 0);
+    
+    if(result == ORDER_EMPTY){
+        return -1;
+    }
 
-    server_reply[len] = 0;
+    if(result == CONNECTION_LOST){
+        connectionLost();
+        return -1;
+    }
+
+    unsigned int length = result;
+
+    server_reply[length] = 0;
     // string req = server_reply;
     // string startPart = "<getSourceImage frameNum=\"";
     // string endPart = "\"/>";
 
-
-
-    return 1;
+    return 0;
 }
 
+void Client::connectionLost(){
+    cerr << "Connection lost(" << _ip << ":" << _port << ")" << endl;
+    close(_socket);
+    _connected = false;
+}
 
 
 void Client::sendRaw(std::string message){
 
-    // if(!_connected){
-    //     //connectToHost();
-    // }
+    if(!_connected){
+        return;
+    }
     int result = send( _socket, message.c_str(), message.size(), 0);
     if( result <= 0 )
     {
-        //_connected = false;
-        perror( "Error calling send" );
+        connectionLost();
     }
+}
+
+void Client::reconnect(){
+    if(_connected){
+        return;
+    }
+    auto now = std::chrono::steady_clock::now();
+    auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(now - _lastConnectTime);
+
+    if(duration.count() > RECONNECT_TIME_MILLISECONDS){
+        // cout << "Reconnect" << endl;
+        connectToHost();
+        _lastConnectTime = std::chrono::steady_clock::now();
+    }
+    
 }
 
 vector<string> metaJsons;
