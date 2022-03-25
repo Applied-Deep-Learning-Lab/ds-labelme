@@ -160,7 +160,6 @@ void initOnFirst(){
         //system("clear");
         
         imageSender.connectToHost();
-        imageSender.streamMode();
         
         bboxSender.connectToHost();
         bboxSender.sendRaw("<head dataType=\"InferenceBboxes_LabelMe\" version=1 supplierTypeName=\"DeepStream\"/>");
@@ -189,7 +188,10 @@ static bool save_image(const std::string &path,
     
     // return false;
     
+    imageSender.streamMode();
     int req = imageSender.imageRequest();
+    imageSender.blockingMode();
+
     if(req < 0){
         return false;
     }
@@ -222,10 +224,8 @@ static bool save_image(const std::string &path,
     unsigned int dataSize = imageData.dataend - imageData.datastart;
     auto cdata = base64_encode(data, dataSize);
     imageSender.addMeta("imageData", cdata);
-    
-    imageSender.blockingMode();
     imageSender.sendMessage();
-    imageSender.streamMode();
+    
 
     return true;
 }
@@ -339,7 +339,10 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         unsigned obj_counter = 0;
 
         
+        
         initOnFirst();
+        imageSender.reconnect();
+        bboxSender.reconnect();
         sendSimpleJson(ip_surf, frame_meta);
 
 
