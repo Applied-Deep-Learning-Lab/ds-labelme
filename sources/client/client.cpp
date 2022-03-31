@@ -17,10 +17,14 @@
 
 #include "client.h"
 
+
+
 #include "nvdsinfer_custom_impl.h"
 
 #define CONNECTION_LOST 0
 #define ORDER_EMPTY -1
+
+#define DIGITS_IN_MILLISECONDS 3
 
 #define MAX_REPLY_SIZE 200
 #define RECONNECT_TIME_MILLISECONDS 1000
@@ -28,25 +32,16 @@
 
 using namespace std;
 
+const char* zerosLine = "000";
 vector <string> bboxJsons;
 
-Client::Client(std::string configPath)
+Client::Client(const NvDsSocket& params)
 {
 
-    ifstream configFile(configPath);
-
     _connected = false;
-
-
-    if (!configFile)
-    {
-        cerr << "No \"ip.config\" file" << endl;
-        return;
-    }
-    
-    getline(configFile, _ip, ':');
-    configFile >> _port;
-    
+    _name = params.name;
+    _port = params.port;
+    _ip = params.ip;
 
     return;
 }
@@ -91,7 +86,8 @@ void Client::connectToHost(){
             return;
     }
     _connected = true;
-    cout << "Connected (" << _ip << ":" << _port << ")" << endl;
+    sendRaw("<head dataType=\"" + _name + "\">");
+    cout << _name << " connected (" << _ip << ":" << _port << ")" << endl;
     
 }
 
@@ -124,7 +120,7 @@ int Client::imageRequest(){
 }
 
 void Client::connectionLost(){
-    cerr << "Connection lost(" << _ip << ":" << _port << ")" << endl;
+    cerr << _name << " lost(" << _ip << ":" << _port << ")" << endl;
     close(_socket);
     _connected = false;
 }
@@ -187,29 +183,16 @@ void Client::addMetaTime(string key, const uint64_t value){
     {
         perror("Time format error");
     }
+    
+    string millisecondsText = to_string(milliseconds);
 
-    strTmp += (string)"." + to_string(milliseconds);
+    // Добавление нулей к миллисикундам
+    millisecondsText = (zerosLine + millisecondsText.length()) + millisecondsText;
+
+    strTmp += (string)"." + millisecondsText; 
 
     addMeta(key, strTmp);
 }
-
-// void Client::addMetaTime(string key, const int64_t value){
-    
-//     char arcString [100];
-//     std::string strTmp;
-
-//     if (strftime (arcString, 100, "%Y-%m-%d %H:%M:%S", gmtime(&value)) != 0)
-//     {
-//         strTmp = arcString;
-//     }
-//     else
-//     {
-//         perror("Time format error");
-//     }
-    
-//     addMeta(key, strTmp);
-// }
-
 
 
 void Client::addMeta(string key, int64_t value){

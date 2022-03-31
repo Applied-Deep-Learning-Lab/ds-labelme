@@ -57,6 +57,10 @@ constexpr unsigned MAX_INSTANCES = 128;
 static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 1920;
 static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 1080;
 
+const string imageName = "tmp.jpg";
+const string pathToImage = "/dev/shm/ds-labelme/";
+const string imageFullName = pathToImage + imageName;
+
 AppCtx *appCtx[MAX_INSTANCES];
 static guint cintr = FALSE;
 static GMainLoop *main_loop = nullptr;
@@ -103,8 +107,22 @@ GOptionEntry entries[] = {
 };
 
 
-Client bboxSender("configs/ip.config");
-Client imageSender("configs/image_send_ip.config");
+Client* labelSender;
+Client* imageSender;
+
+// Перед основным циклом дипстрима.
+void OnStart(){
+    system(((string)"mkdir -p " + pathToImage).c_str());
+    labelSender = new Client(appCtx[0]->config.label_socket);
+    imageSender = new Client(appCtx[0]->config.image_socket);
+    labelSender->connectToHost();
+    imageSender->connectToHost();
+}
+
+void OnStop(){
+    delete labelSender;
+    delete imageSender;
+}
 
 void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
     BBbox bbox;
@@ -144,27 +162,12 @@ void requestWaiter()
 {
     // while (true)
     // {
-    //     imageSender.imageRequest();
+    //     imageSender->imageRequest();
     //     g_lock.lock();
     //     needSaveImage = true;
     //     g_lock.unlock();
     // }
      
-}
-
-
-void initOnFirst(){
-    static bool isPostProcStart = true;
-    if(isPostProcStart){
-        isPostProcStart = false;
-        //system("clear");
-        
-        imageSender.connectToHost();
-        
-        bboxSender.connectToHost();
-        bboxSender.sendRaw("<head dataType=\"InferenceBboxes_LabelMe\" version=1 supplierTypeName=\"DeepStream\"/>");
-        // imageSender.sendRaw("<head dataType=\"InferenceBboxes_LabelMe\" version=1 supplierTypeName=\"DeepStream\"/>");
-    }
 }
 
 
@@ -186,18 +189,19 @@ static bool save_image(const std::string &path,
                        NvBufSurface *ip_surf, NvDsObjectMeta *obj_meta,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
     
-    // return false;
-    
-    imageSender.streamMode();
-    int req = imageSender.imageRequest();
-    imageSender.blockingMode();
+    imageSender->streamMode();
+    int req = imageSender->imageRequest();
+
+    imageSender->blockingMode();
 
     if(req < 0){
+
         return false;
     }
+    cout << "Request image" << endl;
 
-    bboxProcess(imageSender, frame_meta);
-    addMeta(imageSender, ip_surf, frame_meta);
+    bboxProcess(*imageSender, frame_meta);
+    addMeta(*imageSender, ip_surf, frame_meta);
 
     NvDsObjEncUsrArgs userData = {0};
     if (path.size() >= sizeof(userData.fileNameImg)) {
@@ -218,22 +222,21 @@ static bool save_image(const std::string &path,
     
     nvds_obj_enc_process(g_img_meta_consumer.get_obj_ctx_handle(), &userData, ip_surf, obj_meta, frame_meta);
     nvds_obj_enc_finish(g_img_meta_consumer.get_obj_ctx_handle());
-
     cv::Mat imageData = cv::imread(path);
     uchar* data = imageData.data;
     unsigned int dataSize = imageData.dataend - imageData.datastart;
     auto cdata = base64_encode(data, dataSize);
-    imageSender.addMeta("imageData", cdata);
-    imageSender.sendMessage();
+    imageSender->addMeta("imageData", cdata);
+    imageSender->sendMessage();
     
 
     return true;
 }
 
 void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
-    bboxProcess(bboxSender, frame_meta);
-    addMeta(bboxSender, ip_surf, frame_meta);
-    bboxSender.sendMessage();
+    bboxProcess(*labelSender, frame_meta);
+    addMeta(*labelSender, ip_surf, frame_meta);
+    labelSender->sendMessage();
 }
 
 
@@ -339,10 +342,8 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         unsigned obj_counter = 0;
 
         
-        
-        initOnFirst();
-        imageSender.reconnect();
-        bboxSender.reconnect();
+        imageSender->reconnect();
+        labelSender->reconnect();
         sendSimpleJson(ip_surf, frame_meta);
 
 
@@ -352,9 +353,7 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
         dummy_obj_meta.rect_params.top = 0;
         dummy_obj_meta.rect_params.left = 0;
-        save_image("data/images/tmp.jpg", ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
-        
-
+        save_image(imageFullName, ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
         
         g_img_meta_consumer.unlock_source_nb(source_number);
     }
@@ -1021,7 +1020,11 @@ int main(int argc, char *argv[]) {
         changemode(1);
 
         g_timeout_add(40, event_thread_func, nullptr);
+
+        OnStart();
         g_main_loop_run(main_loop);
+        OnStop();
+        
 
         changemode(0);
 

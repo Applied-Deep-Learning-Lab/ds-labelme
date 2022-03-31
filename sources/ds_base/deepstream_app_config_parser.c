@@ -29,6 +29,17 @@
 #define CONFIG_GROUP_APP_GIE_OUTPUT_DIR "gie-kitti-output-dir"
 #define CONFIG_GROUP_APP_GIE_TRACK_OUTPUT_DIR "kitti-track-output-dir"
 
+#define CONFIG_GROUP_SOCKET_NAME "name"
+#define CONFIG_GROUP_SOCKET_IP "ip"
+#define CONFIG_GROUP_SOCKET_PORT "port"
+
+#define CONFIG_GROUP_LABEL_SOCKET "label-socket"
+#define CONFIG_GROUP_IMAGE_SOCKET "image-socket"
+
+#define SOCKET_LABEL 0
+#define SOCKET_IMAGE 1
+
+
 #define CONFIG_GROUP_TESTS "tests"
 #define CONFIG_GROUP_TESTS_FILE_LOOP "file-loop"
 
@@ -248,6 +259,64 @@ done:
   return ret;
 }
 
+static gboolean
+parse_socket (NvDsConfig *config, GKeyFile *key_file, gchar *cfg_file_path, guint8 socketType)
+{
+  gboolean ret = FALSE;
+  gchar **keys = NULL;
+  gchar **key = NULL;
+  GError *error = NULL;
+  gchar* socket_group_name;
+  NvDsSocket* socket_config;
+
+  if(socketType == SOCKET_LABEL){
+    socket_group_name = CONFIG_GROUP_LABEL_SOCKET;
+    socket_config = &config->label_socket;
+  } else {
+    socket_group_name = CONFIG_GROUP_IMAGE_SOCKET;
+    socket_config = &config->image_socket;
+  }
+  
+
+  keys = g_key_file_get_keys (key_file, socket_group_name, NULL, &error);
+  CHECK_ERROR (error);
+
+  for (key = keys; *key; key++) {
+    if (!g_strcmp0 (*key, CONFIG_GROUP_SOCKET_NAME)) {
+      socket_config->name = 
+          g_key_file_get_string (key_file, socket_group_name,
+          CONFIG_GROUP_SOCKET_NAME, &error);
+      CHECK_ERROR (error);
+    }else if (!g_strcmp0 (*key, CONFIG_GROUP_SOCKET_IP)) {
+      socket_config->ip = 
+          g_key_file_get_string (key_file, socket_group_name,
+          CONFIG_GROUP_SOCKET_IP, &error);
+      CHECK_ERROR (error);
+    } else if (!g_strcmp0 (*key, CONFIG_GROUP_SOCKET_PORT)) {
+      socket_config->port =
+          g_key_file_get_integer (key_file, socket_group_name,
+          CONFIG_GROUP_SOCKET_PORT, &error);
+      CHECK_ERROR (error);
+    } else {
+      NVGSTDS_WARN_MSG_V ("Unknown key '%s' for group [%s]", *key,
+                          socket_group_name);
+    }
+  }
+
+  ret = TRUE;
+done:
+  if (error) {
+    g_error_free (error);
+  }
+  if (keys) {
+    g_strfreev (keys);
+  }
+  if (!ret) {
+    NVGSTDS_ERR_MSG_V ("%s failed", __func__);
+  }
+  return ret;
+}
+
 
 gboolean
 parse_config_file (NvDsConfig *config, gchar *cfg_file_path)
@@ -307,6 +376,14 @@ parse_config_file (NvDsConfig *config, gchar *cfg_file_path)
     GST_CAT_DEBUG (APP_CFG_PARSER_CAT, "Parsing group: %s", *group);
     if (!g_strcmp0 (*group, CONFIG_GROUP_APP)) {
       parse_err = !parse_app (config, cfg_file, cfg_file_path);
+    }
+
+    if (!g_strcmp0 (*group, CONFIG_GROUP_LABEL_SOCKET)) {
+      parse_err = !parse_socket (config, cfg_file, cfg_file_path, SOCKET_LABEL);
+    }
+
+    if (!g_strcmp0 (*group, CONFIG_GROUP_IMAGE_SOCKET)) {
+      parse_err = !parse_socket (config, cfg_file, cfg_file_path, SOCKET_IMAGE);
     }
 
     if (!strncmp (*group, CONFIG_GROUP_SOURCE,

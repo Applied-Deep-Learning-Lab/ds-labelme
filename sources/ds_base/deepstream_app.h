@@ -121,6 +121,13 @@ typedef struct
 
 typedef struct
 {
+  gchar* name;
+  gchar* ip;
+  guint16 port;
+}NvDsSocket;
+
+typedef struct
+{
   gboolean enable_perf_measurement;
   gint file_loop;
   gboolean source_list_enabled;
@@ -150,7 +157,12 @@ typedef struct
   NvDsSinkMsgConvBrokerConfig msg_conv_config;
   NvDsImageSave image_save_config;
 
+  NvDsSocket image_socket;
+  NvDsSocket label_socket;
+
 } NvDsConfig;
+
+
 
 typedef struct
 {

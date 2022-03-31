@@ -2,6 +2,16 @@
 enable-perf-measurement=1
 perf-measurement-interval-sec=5
 
+[image-socket]
+name=SourceImages_LabelMe
+ip=127.0.0.1
+port=777
+
+[label-socket]
+name=InferenceBboxes_LabelMe
+ip=127.0.0.1
+port=776
+
 [tiled-display]
 enable=0
 rows=1
@@ -84,7 +94,7 @@ bitrate=6000000
 #H265 Profile - 0=Main 1=Main10
 profile=0
 # set below properties in case of RTSPStreaming
-rtsp-port=8554
+rtsp-port=7705 # rtsp://apollo2.ci.nsu.ru:7775/ds-test
 udp-port=5400
 
 [sink3]
@@ -106,7 +116,7 @@ rtsp-port=8554
 udp-port=5400
 
 [osd]
-enable=1
+enable=0
 gpu-id=0
 border-width=1
 text-size=15
