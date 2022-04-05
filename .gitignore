@@ -5,3 +5,4 @@ data/
 lib/
 .vscode/
 lib
+platform-paths.sh

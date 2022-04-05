@@ -20,28 +20,21 @@
  * DEALINGS IN THE SOFTWARE.
  */
 
+// Deepstream
 #include "gstnvdsmeta.h"
-#include "nvbufsurface.h"
-#include "deepstream_app.h"
-#include "deepstream_config_file_parser.h"
 #include "nvds_version.h"
+#include "nvbufsurface.h"
+#include "nvbufsurftransform.h"
+#include "nvds_obj_encode.h"
+#include "gst-nvmessage.h"
+
+// C++
 #include <cstring>
+#include <string>
 #include <unistd.h>
 #include <termios.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <opencv2/imgcodecs.hpp>
-#include <string>
-#include "nvds_obj_encode.h"
-#include "gst-nvmessage.h"
-
-#include "client/client.h"
-//#include "base64/image_loader.h"
-#include "base64/base64.h"
-
-#include "image_meta_consumer.h"
-#include "image_meta_producer.h"
-
 #include <iostream>
 #include <vector>
 #include <ctime>
@@ -49,17 +42,41 @@
 #include <mutex>
 #include <chrono>
 
+// OpenCV
+#include <opencv2/imgcodecs.hpp>
+
+// Custom deepstream
+#include "deepstream_app.h"
+#include "deepstream_config_file_parser.h"
+#include "image_meta_consumer.h"
+#include "image_meta_producer.h"
+
+// Additional modules
+#include "client/client.h"
+#include "base64/base64.h"
+
 using namespace std;
 
-constexpr unsigned MAX_INSTANCES = 128;
-#define APP_TITLE "DeepStream Transfer Learning App"
+// Settings
+const string imageName = "tmp.jpg";
+const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
+const string imageFullName = pathToImage + imageName;
 
 static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 1920;
 static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 1080;
 
-const string imageName = "tmp.jpg";
-const string pathToImage = "/dev/shm/ds-labelme/";
-const string imageFullName = pathToImage + imageName;
+static constexpr unsigned SEND_IMAGE_WIDTH = 640;
+static constexpr unsigned SEND_IMAGE_HEIGHT = 640;
+
+constexpr unsigned MAX_INSTANCES = 128;
+
+#define APP_TITLE "DeepStream Transfer Learning App"
+
+
+// Definitions
+
+Client* labelSender;
+Client* imageSender;
 
 AppCtx *appCtx[MAX_INSTANCES];
 static guint cintr = FALSE;
@@ -107,11 +124,10 @@ GOptionEntry entries[] = {
 };
 
 
-Client* labelSender;
-Client* imageSender;
 
-// Перед основным циклом дипстрима.
-void OnStart(){
+
+// Before deepstream loop
+void onStart(){
     system(((string)"mkdir -p " + pathToImage).c_str());
     labelSender = new Client(appCtx[0]->config.label_socket);
     imageSender = new Client(appCtx[0]->config.image_socket);
@@ -119,7 +135,7 @@ void OnStart(){
     imageSender->connectToHost();
 }
 
-void OnStop(){
+void onStop(){
     delete labelSender;
     delete imageSender;
 }
@@ -129,17 +145,13 @@ void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
         NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
         
-        //obj->text_params
-        // char * text = (char *) obj->text_params.display_text;
-        // g_print("%s", text);
         bbox.left   = obj->detector_bbox_info.org_bbox_coords.left;
         bbox.top    = obj->detector_bbox_info.org_bbox_coords.top;
         bbox.width  = obj->detector_bbox_info.org_bbox_coords.width;
         bbox.height = obj->detector_bbox_info.org_bbox_coords.height;
         bbox.id     = obj->object_id;
         bbox.label  = obj->text_params.display_text;
-        // frameInfo.bboxes[prediction].confidence = obj->tracker_confidence;
-        // frameInfo.bboxes[prediction].objectId = obj->object_id;
+
         client.addBBox(bbox);
     }
 }
@@ -157,21 +169,6 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     client.addMeta("deltaMilliseconds", (now - frame_meta->ntp_timestamp) / 1000000);
 
 }
-
-void requestWaiter()
-{
-    // while (true)
-    // {
-    //     imageSender->imageRequest();
-    //     g_lock.lock();
-    //     needSaveImage = true;
-    //     g_lock.unlock();
-    // }
-     
-}
-
-
-
 
 /// Will save an image cropped with the dimension specified by obj_meta
 /// If the path is too long, the save will not occur and an error message will be
@@ -200,6 +197,75 @@ static bool save_image(const std::string &path,
     }
     cout << "Request image" << endl;
 
+    int srcWidth = ip_surf->surfaceList[0].width;
+    int srcHeight = ip_surf->surfaceList[0].height;
+
+    NvBufSurfTransformRect src_rect;
+    src_rect.top = 0;
+    src_rect.left = 0;
+    src_rect.height = srcHeight;
+    src_rect.width = srcWidth;
+
+    NvBufSurfTransformRect dst_rect;
+    dst_rect.top = 0;
+    dst_rect.left = 0;
+    dst_rect.height = SEND_IMAGE_HEIGHT;
+    dst_rect.width = SEND_IMAGE_WIDTH;
+    
+    // Save ratio
+    if(src_rect.width > src_rect.height){;
+        float scale = dst_rect.width / (float)src_rect.width;
+        dst_rect.height = src_rect.height * scale;
+        dst_rect.top = (SEND_IMAGE_HEIGHT - dst_rect.height) / 2;
+    }else{
+        float scale = dst_rect.height / (float)src_rect.height;
+        dst_rect.width = src_rect.width * scale;
+        dst_rect.height = (SEND_IMAGE_WIDTH - dst_rect.width) / 2;
+    }
+
+
+
+
+   
+
+    NvBufSurfTransformParams transform;
+    transform.dst_rect = &dst_rect;
+    transform.src_rect = &src_rect;
+    transform.transform_filter = NvBufSurfTransformInter_Nearest;
+    transform.transform_flip = NvBufSurfTransform_None;
+    transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;    
+
+    NvBufSurface* ip_surf_sys;
+    NvBufSurface* ip_surf_rgb;
+    NvBufSurfTransformConfigParams transform_config_params;
+    NvBufSurfaceCreateParams nvbufsurface_create_params;
+	
+	nvbufsurface_create_params.gpuId  = ip_surf->gpuId;
+	nvbufsurface_create_params.width  = (guint) SEND_IMAGE_WIDTH;
+	nvbufsurface_create_params.height = (guint) SEND_IMAGE_HEIGHT;
+	nvbufsurface_create_params.size = 0;
+	nvbufsurface_create_params.isContiguous = true;
+	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGR;
+	nvbufsurface_create_params.layout = NVBUF_LAYOUT_PITCH;
+    nvbufsurface_create_params.memType = NVBUF_MEM_SYSTEM;
+
+    gint create_result = NvBufSurfaceCreate(&ip_surf_sys, ip_surf->batchSize, &nvbufsurface_create_params);
+    nvbufsurface_create_params.memType = NVBUF_MEM_DEFAULT;
+    create_result = NvBufSurfaceCreate(&ip_surf_rgb, ip_surf->batchSize, &nvbufsurface_create_params);
+    
+    auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
+        if(tranformResult != NvBufSurfTransformError_Success) {
+            std::cerr << "transform failed\n";
+            return false;
+    }
+
+    int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
+    
+    // cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC3, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
+    // cv::imwrite(pathToImage +  "cv_test.jpg", mat);
+
+    
+
     bboxProcess(*imageSender, frame_meta);
     addMeta(*imageSender, ip_surf, frame_meta);
 
@@ -210,22 +276,11 @@ static bool save_image(const std::string &path,
                   << "Should be less than " << sizeof(userData.fileNameImg) << " characters.";
         return false;
     }
-    userData.saveImg = TRUE;
-    userData.attachUsrMeta = FALSE;
-    path.copy(userData.fileNameImg, path.size());
-    userData.fileNameImg[path.size()] = '\0';
-    userData.objNum = obj_counter++;
-    userData.quality = 100;
-    
-    g_img_meta_consumer.init_image_save_library_on_first_time();
-    
-    
-    nvds_obj_enc_process(g_img_meta_consumer.get_obj_ctx_handle(), &userData, ip_surf, obj_meta, frame_meta);
-    nvds_obj_enc_finish(g_img_meta_consumer.get_obj_ctx_handle());
-    cv::Mat imageData = cv::imread(path);
-    uchar* data = imageData.data;
-    unsigned int dataSize = imageData.dataend - imageData.datastart;
+
+    uchar* data = (uchar*)ip_surf_sys->surfaceList[0].dataPtr;
+    unsigned int dataSize = ip_surf_sys->surfaceList[0].dataSize;
     auto cdata = base64_encode(data, dataSize);
+    imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
     imageSender->addMeta("imageData", cdata);
     imageSender->sendMessage();
     
@@ -319,9 +374,9 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         return;
     }
     NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
-
     gst_buffer_unmap(buf, &inmap);
 
+    
     /// Creating an ImageMetaProducer and registering a consumer.
     ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
 
@@ -1021,9 +1076,9 @@ int main(int argc, char *argv[]) {
 
         g_timeout_add(40, event_thread_func, nullptr);
 
-        OnStart();
+        onStart();
         g_main_loop_run(main_loop);
-        OnStop();
+        onStop();
         
 
         changemode(0);

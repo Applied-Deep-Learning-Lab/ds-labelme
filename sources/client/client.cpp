@@ -86,7 +86,7 @@ void Client::connectToHost(){
             return;
     }
     _connected = true;
-    sendRaw("<head dataType=\"" + _name + "\">");
+    sendRaw("<head dataType=\"" + _name + "\" version=1 supplierTypeName=\"DeepStream\"/>");
     cout << _name << " connected (" << _ip << ":" << _port << ")" << endl;
     
 }
