@@ -245,7 +245,7 @@ static bool save_image(const std::string &path,
 	nvbufsurface_create_params.height = (guint) SEND_IMAGE_HEIGHT;
 	nvbufsurface_create_params.size = 0;
 	nvbufsurface_create_params.isContiguous = true;
-	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGR;
+	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGRA;
 	nvbufsurface_create_params.layout = NVBUF_LAYOUT_PITCH;
     nvbufsurface_create_params.memType = NVBUF_MEM_SYSTEM;
 
@@ -261,13 +261,13 @@ static bool save_image(const std::string &path,
 
     int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
     
-    // cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC3, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
+    // cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
     // cv::imwrite(pathToImage +  "cv_test.jpg", mat);
 
     
 
     bboxProcess(*imageSender, frame_meta);
-    addMeta(*imageSender, ip_surf, frame_meta);
+    addMeta(*imageSender, ip_surf_sys, frame_meta);
 
     NvDsObjEncUsrArgs userData = {0};
     if (path.size() >= sizeof(userData.fileNameImg)) {
@@ -282,6 +282,7 @@ static bool save_image(const std::string &path,
     auto cdata = base64_encode(data, dataSize);
     imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
     imageSender->addMeta("imageData", cdata);
+    imageSender->addMeta("imageColorFormat", "BGRA");
     imageSender->sendMessage();
     
 
