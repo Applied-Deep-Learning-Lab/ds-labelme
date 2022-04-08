@@ -24,7 +24,7 @@ CXX=g++
 
 APP:= ../ds_v1.out
 
-PLATFORM_SETTINGS:=../platform-paths.sh
+PLATFORM_SETTINGS:=../platform/paths.sh
 
 TARGET_DEVICE = $(shell gcc -dumpmachine | cut -f1 -d -)
 
