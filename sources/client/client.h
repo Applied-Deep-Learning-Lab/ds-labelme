@@ -6,6 +6,8 @@
 
 #include <netinet/in.h>
 
+#include "../ds_base/deepstream_app.h"
+
 struct BBbox
 {
     float left, top, width, height, confidence;
@@ -17,7 +19,7 @@ struct BBbox
 class Client{
 
 public:
-    Client(std::string configPath);
+    Client(const NvDsSocket& params);
     ~Client();
 
     void connectToHost();
@@ -44,6 +46,7 @@ private:
 
     std::string _ip;
     int _port;
+    std::string _name;
 
     int _socket;
     sockaddr_in _host;
