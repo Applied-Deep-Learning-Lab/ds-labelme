@@ -5,12 +5,12 @@ perf-measurement-interval-sec=5
 [label-socket]
 name=InferenceBboxes_LabelMe
 ip=127.0.0.1
-port=776
+port=7706
 
 [image-socket]
 name=SourceImages_LabelMe
 ip=127.0.0.1
-port=777
+port=7707
 
 [tiled-display]
 enable=0
@@ -148,7 +148,7 @@ enable=1
 gpu-id=0
 gie-unique-id=1
 nvbuf-memory-type=0
-config-file=/root/Mikhail/DeepStream1/labelmeSender_Bubbles/config_infer_primary_yoloV5_bubbles.txt
+config-file=/root/Mikhail/DeepStream/labelmeSender_Bubbles/config_infer_pr_yV5_bubbles_Apollo.txt
 #config-file=yolov5_triton.txt
 #(0): nvinfer; (1): nvinferserver
 plugin-type=0

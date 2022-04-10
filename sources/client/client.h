@@ -15,6 +15,10 @@ struct BBbox
     std::string label;
 };
 
+struct RecvestResult{
+    bool success;
+    std::string message;
+};
 
 class Client{
 
@@ -26,7 +30,7 @@ public:
 
     void blockingMode();
     void streamMode();
-    int imageRequest();
+    RecvestResult recvest();
 
     void addMeta(std::string key);
     void addMeta(std::string key, std::string value);
