@@ -44,6 +44,7 @@
 
 // OpenCV
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 // Custom deepstream
 #include "deepstream_app.h"
@@ -62,11 +63,16 @@ const string imageName = "tmp.jpg";
 const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
 const string imageFullName = pathToImage + imageName;
 
-static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 1920;
-static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 1080;
+static const int FPS_LIMIT = 30;
+
+
+static constexpr auto DELAY_FOR_LIMIT = std::chrono::milliseconds(1000 / FPS_LIMIT);
+
+static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 640;
+static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 480;
 
 static constexpr unsigned SEND_IMAGE_WIDTH = 640;
-static constexpr unsigned SEND_IMAGE_HEIGHT = 640;
+static constexpr unsigned SEND_IMAGE_HEIGHT = 480;
 
 constexpr unsigned MAX_INSTANCES = 128;
 
@@ -186,10 +192,9 @@ static bool save_image(const std::string &path,
                        NvBufSurface *ip_surf, NvDsObjectMeta *obj_meta,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
     
+    
     imageSender->streamMode();
     int req = imageSender->imageRequest();
-
-    imageSender->blockingMode();
 
     if(req < 0){
 
@@ -277,14 +282,31 @@ static bool save_image(const std::string &path,
         return false;
     }
 
+    int width = ip_surf_sys->surfaceList[0].width;
+    int height = ip_surf_sys->surfaceList[0].height;
+    int pitch = ip_surf_sys->surfaceList[0].pitch;
+
     uchar* data = (uchar*)ip_surf_sys->surfaceList[0].dataPtr;
     unsigned int dataSize = ip_surf_sys->surfaceList[0].dataSize;
-    auto cdata = base64_encode(data, dataSize);
-    imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
-    imageSender->addMeta("imageData", cdata);
-    imageSender->addMeta("imageColorFormat", "BGRA");
-    imageSender->sendMessage();
+
+    cv::Mat imagef = cv::Mat(height, width, CV_8UC4, data, pitch);
+    cv::Mat imaget = cv::Mat(height, width, CV_8UC3);
+
     
+    cv::cvtColor(imagef, imaget, cv::COLOR_BGRA2BGR);
+
+    auto cdata = base64_encode(imaget.data, width * height * 3);
+
+    
+    // cv::imwrite("/dev/shm/test.jpg", imaget);
+
+    imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
+    imageSender->addMeta("imageColorFormat", "BGR");
+    imageSender->addMeta("imageData", cdata);
+
+    imageSender->blockingMode();
+    imageSender->sendMessage();
+    imageSender->streamMode();
 
     return true;
 }
@@ -293,6 +315,19 @@ void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     bboxProcess(*labelSender, frame_meta);
     addMeta(*labelSender, ip_surf, frame_meta);
     labelSender->sendMessage();
+}
+
+void limitFps(){
+    
+    static auto last = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double, std::milli> processTime = now - last;
+
+    if(processTime < DELAY_FOR_LIMIT){
+        std::this_thread::sleep_for(DELAY_FOR_LIMIT - processTime);
+    }
+    last = std::chrono::high_resolution_clock::now();
 }
 
 
@@ -363,6 +398,7 @@ static bool obj_meta_box_is_above_minimum_dimension(const NvDsObjectMeta *obj_me
 static void
 after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
                            NvDsBatchMeta *batch_meta, guint index) {
+    
     if (g_img_meta_consumer.get_is_stopped()) {
         std::cerr << "Could not save image and metadata: "
                   << "Consumer is stopped.\n";
@@ -374,6 +410,8 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         std::cerr << "input buffer mapinfo failed\n";
         return;
     }
+    
+    
     NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
     gst_buffer_unmap(buf, &inmap);
 
@@ -382,10 +420,11 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
     ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
 
     bool at_least_one_image_saved = false;
-
+    
     for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
          l_frame = l_frame->next) {
         NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
+        
         unsigned source_number = frame_meta->pad_index;
         
         g_img_meta_consumer.lock_source_nb(source_number);
@@ -413,6 +452,7 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         
         g_img_meta_consumer.unlock_source_nb(source_number);
     }
+    limitFps();
 }
 
 /**
@@ -1072,10 +1112,9 @@ int main(int argc, char *argv[]) {
         }
 
         print_runtime_commands();
-
         changemode(1);
 
-        g_timeout_add(40, event_thread_func, nullptr);
+        // g_timeout_add(40, event_thread_func, nullptr);
 
         onStart();
         g_main_loop_run(main_loop);

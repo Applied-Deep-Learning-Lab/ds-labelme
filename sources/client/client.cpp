@@ -94,29 +94,78 @@ void Client::connectToHost(){
 int Client::imageRequest(){
     char server_reply[MAX_REPLY_SIZE];
 
+    static string recvbuf = "";
+    static string inTag = "";
+    static int order = 0;
+    static bool isTagInside = false;
+
     if(!_connected){
         return -1;
     }
 
     int result = recv(_socket, server_reply , MAX_REPLY_SIZE - 1 , 0);
     
-    if(result == ORDER_EMPTY){
-        return -1;
-    }
-
     if(result == CONNECTION_LOST){
         connectionLost();
         return -1;
     }
 
-    unsigned int length = result;
+    if(result != ORDER_EMPTY){
 
-    server_reply[length] = 0;
+        unsigned int length = result;
+        server_reply[length] = 0;
+        recvbuf += server_reply;
+
+        while(recvbuf.length() > 0){
+            if(isTagInside == false){
+                auto tagStart = recvbuf.find('<');
+                
+                if(tagStart != string::npos){
+                    isTagInside = true;
+                    recvbuf = recvbuf.erase(0, tagStart + 1);
+                } else {
+                    recvbuf = "";
+                }
+                
+            }
+
+            if(isTagInside == true){
+                auto tagStart = recvbuf.find('>');
+
+                
+
+                if(tagStart != string::npos){
+                    isTagInside = false;
+                    inTag += recvbuf.substr(0, tagStart);
+                    cout << "Recvest: " << inTag << endl;
+                    recvbuf = recvbuf.erase(0, tagStart + 1);
+                    inTag = "";
+                    order++;
+                    
+                    
+                } else {
+                    inTag += recvbuf;
+                    recvbuf = "";
+                }
+            }
+        }
+    }
+
+    if(order > 0){
+        order--;
+        return 0;
+    }
+
+    
+    
+    
+
+    
     // string req = server_reply;
     // string startPart = "<getSourceImage frameNum=\"";
     // string endPart = "\"/>";
 
-    return 0;
+    return -1;
 }
 
 void Client::connectionLost(){
