@@ -83,6 +83,12 @@ constexpr unsigned MAX_INSTANCES = 128;
 
 Client* labelSender;
 Client* imageSender;
+thread* recvestLoop;
+
+static int recvCount = 0;
+std::mutex recvCountLock;
+std::mutex recvSendLock;
+bool stop = false;
 
 AppCtx *appCtx[MAX_INSTANCES];
 static guint cintr = FALSE;
@@ -130,7 +136,82 @@ GOptionEntry entries[] = {
 };
 
 
+void test(){
+    while (true)
+    {
+        cout << "hello from thread" << endl;
+        this_thread::sleep_for(1000ms);
+    }
+    
+}
 
+
+void parseXML(string input){
+    static string recvbuf = "";
+    static string inTag = "";
+    static bool isTagInside = false;
+
+    cout << input << endl;
+
+    recvbuf += input;
+
+    while(recvbuf.length() > 0){
+        if(isTagInside == false){
+            auto tagStart = recvbuf.find('<');
+            
+            if(tagStart != string::npos){
+                isTagInside = true;
+                recvbuf = recvbuf.erase(0, tagStart + 1);
+            } else {
+                recvbuf = "";
+            }
+            
+        }
+
+        if(isTagInside == true){
+            auto tagStart = recvbuf.find('>');
+
+            
+
+            if(tagStart != string::npos){
+                isTagInside = false;
+                inTag += recvbuf.substr(0, tagStart);
+                cout << "Recvest: " << inTag << endl;
+                recvbuf = recvbuf.erase(0, tagStart + 1);
+                
+                string test = inTag.substr(0, 4);
+                if(inTag.substr(0, 4) != "head"){
+                    recvCountLock.lock();
+                    recvCount++;
+                    recvCountLock.unlock();
+                }
+                inTag = "";
+
+            } else {
+                inTag += recvbuf;
+                recvbuf = "";
+            }
+        }
+    }
+}
+
+void recieveImage(Client* client){
+    while (!stop)
+    {
+        // cout << "try_recv" << endl;
+        recvSendLock.lock();
+        RecvestResult recvest = client->recvest();
+        recvSendLock.unlock();
+        // cout << "recv: " << recv.success << endl;
+        if(recvest.success){
+            parseXML(recvest.message);   
+        }
+
+        this_thread::sleep_for(1000ms);
+        
+    }
+    cout << "sender stoped" << endl;
+}
 
 // Before deepstream loop
 void onStart(){
@@ -139,11 +220,13 @@ void onStart(){
     imageSender = new Client(appCtx[0]->config.image_socket);
     labelSender->connectToHost();
     imageSender->connectToHost();
+    recvestLoop = new thread(recieveImage, imageSender);
 }
 
 void onStop(){
     delete labelSender;
     delete imageSender;
+    stop = true;
 }
 
 void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
@@ -193,13 +276,18 @@ static bool save_image(const std::string &path,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
     
     
-    imageSender->streamMode();
-    int req = imageSender->imageRequest();
+    // int req = imageSender->imageRequest();
 
-    if(req < 0){
-
+    bool isCLock = recvCountLock.try_lock();
+    if(!isCLock){
         return false;
     }
+    if(recvCount == 0){
+        recvCountLock.unlock();
+        return false;
+    }
+    recvCount--;
+    recvCountLock.unlock();
     cout << "Request image" << endl;
 
     int srcWidth = ip_surf->surfaceList[0].width;
@@ -304,9 +392,15 @@ static bool save_image(const std::string &path,
     imageSender->addMeta("imageColorFormat", "BGR");
     imageSender->addMeta("imageData", cdata);
 
-    imageSender->blockingMode();
+    bool isLocked = recvSendLock.try_lock();
+
+    if(!isLocked){
+        cout << "sender is busy" << endl;
+        return false;
+    }
+
     imageSender->sendMessage();
-    imageSender->streamMode();
+    recvSendLock.unlock();
 
     return true;
 }
