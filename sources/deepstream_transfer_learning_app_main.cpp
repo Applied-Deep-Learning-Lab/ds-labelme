@@ -44,6 +44,7 @@
 
 // OpenCV
 #include <opencv2/imgcodecs.hpp>
+#include <opencv2/imgproc.hpp>
 
 // Custom deepstream
 #include "deepstream_app.h"
@@ -62,11 +63,16 @@ const string imageName = "tmp.jpg";
 const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
 const string imageFullName = pathToImage + imageName;
 
-static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 1920;
-static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 1080;
+static const int FPS_LIMIT = 30;
+
+
+static constexpr auto DELAY_FOR_LIMIT = std::chrono::milliseconds(1000 / FPS_LIMIT);
+
+static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 640;
+static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 480;
 
 static constexpr unsigned SEND_IMAGE_WIDTH = 640;
-static constexpr unsigned SEND_IMAGE_HEIGHT = 640;
+static constexpr unsigned SEND_IMAGE_HEIGHT = 480;
 
 constexpr unsigned MAX_INSTANCES = 128;
 
@@ -77,6 +83,12 @@ constexpr unsigned MAX_INSTANCES = 128;
 
 Client* labelSender;
 Client* imageSender;
+thread* recvestLoop;
+
+static int recvCount = 0;
+std::mutex recvCountLock;
+std::mutex recvSendLock;
+bool stop = false;
 
 AppCtx *appCtx[MAX_INSTANCES];
 static guint cintr = FALSE;
@@ -124,7 +136,82 @@ GOptionEntry entries[] = {
 };
 
 
+void test(){
+    while (true)
+    {
+        cout << "hello from thread" << endl;
+        this_thread::sleep_for(1000ms);
+    }
+    
+}
 
+
+void parseXML(string input){
+    static string recvbuf = "";
+    static string inTag = "";
+    static bool isTagInside = false;
+
+    cout << input << endl;
+
+    recvbuf += input;
+
+    while(recvbuf.length() > 0){
+        if(isTagInside == false){
+            auto tagStart = recvbuf.find('<');
+            
+            if(tagStart != string::npos){
+                isTagInside = true;
+                recvbuf = recvbuf.erase(0, tagStart + 1);
+            } else {
+                recvbuf = "";
+            }
+            
+        }
+
+        if(isTagInside == true){
+            auto tagStart = recvbuf.find('>');
+
+            
+
+            if(tagStart != string::npos){
+                isTagInside = false;
+                inTag += recvbuf.substr(0, tagStart);
+                cout << "Recvest: " << inTag << endl;
+                recvbuf = recvbuf.erase(0, tagStart + 1);
+                
+                string test = inTag.substr(0, 4);
+                if(inTag.substr(0, 4) != "head"){
+                    recvCountLock.lock();
+                    recvCount++;
+                    recvCountLock.unlock();
+                }
+                inTag = "";
+
+            } else {
+                inTag += recvbuf;
+                recvbuf = "";
+            }
+        }
+    }
+}
+
+void recieveImage(Client* client){
+    while (!stop)
+    {
+        // cout << "try_recv" << endl;
+        recvSendLock.lock();
+        RecvestResult recvest = client->recvest();
+        recvSendLock.unlock();
+        // cout << "recv: " << recv.success << endl;
+        if(recvest.success){
+            parseXML(recvest.message);   
+        }
+
+        this_thread::sleep_for(1000ms);
+        
+    }
+    cout << "sender stoped" << endl;
+}
 
 // Before deepstream loop
 void onStart(){
@@ -133,11 +220,13 @@ void onStart(){
     imageSender = new Client(appCtx[0]->config.image_socket);
     labelSender->connectToHost();
     imageSender->connectToHost();
+    recvestLoop = new thread(recieveImage, imageSender);
 }
 
 void onStop(){
     delete labelSender;
     delete imageSender;
+    stop = true;
 }
 
 void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
@@ -186,15 +275,19 @@ static bool save_image(const std::string &path,
                        NvBufSurface *ip_surf, NvDsObjectMeta *obj_meta,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
     
-    imageSender->streamMode();
-    int req = imageSender->imageRequest();
+    
+    // int req = imageSender->imageRequest();
 
-    imageSender->blockingMode();
-
-    if(req < 0){
-
+    bool isCLock = recvCountLock.try_lock();
+    if(!isCLock){
         return false;
     }
+    if(recvCount == 0){
+        recvCountLock.unlock();
+        return false;
+    }
+    recvCount--;
+    recvCountLock.unlock();
     cout << "Request image" << endl;
 
     int srcWidth = ip_surf->surfaceList[0].width;
@@ -277,14 +370,37 @@ static bool save_image(const std::string &path,
         return false;
     }
 
+    int width = ip_surf_sys->surfaceList[0].width;
+    int height = ip_surf_sys->surfaceList[0].height;
+    int pitch = ip_surf_sys->surfaceList[0].pitch;
+
     uchar* data = (uchar*)ip_surf_sys->surfaceList[0].dataPtr;
     unsigned int dataSize = ip_surf_sys->surfaceList[0].dataSize;
-    auto cdata = base64_encode(data, dataSize);
-    imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
-    imageSender->addMeta("imageData", cdata);
-    imageSender->addMeta("imageColorFormat", "BGRA");
-    imageSender->sendMessage();
+
+    cv::Mat imagef = cv::Mat(height, width, CV_8UC4, data, pitch);
+    cv::Mat imaget = cv::Mat(height, width, CV_8UC3);
+
     
+    cv::cvtColor(imagef, imaget, cv::COLOR_BGRA2BGR);
+
+    auto cdata = base64_encode(imaget.data, width * height * 3);
+
+    
+    // cv::imwrite("/dev/shm/test.jpg", imaget);
+
+    imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
+    imageSender->addMeta("imageColorFormat", "BGR");
+    imageSender->addMeta("imageData", cdata);
+
+    bool isLocked = recvSendLock.try_lock();
+
+    if(!isLocked){
+        cout << "sender is busy" << endl;
+        return false;
+    }
+
+    imageSender->sendMessage();
+    recvSendLock.unlock();
 
     return true;
 }
@@ -293,6 +409,19 @@ void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     bboxProcess(*labelSender, frame_meta);
     addMeta(*labelSender, ip_surf, frame_meta);
     labelSender->sendMessage();
+}
+
+void limitFps(){
+    
+    static auto last = std::chrono::high_resolution_clock::now();
+    auto now = std::chrono::high_resolution_clock::now();
+    
+    std::chrono::duration<double, std::milli> processTime = now - last;
+
+    if(processTime < DELAY_FOR_LIMIT){
+        std::this_thread::sleep_for(DELAY_FOR_LIMIT - processTime);
+    }
+    last = std::chrono::high_resolution_clock::now();
 }
 
 
@@ -363,6 +492,7 @@ static bool obj_meta_box_is_above_minimum_dimension(const NvDsObjectMeta *obj_me
 static void
 after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
                            NvDsBatchMeta *batch_meta, guint index) {
+    
     if (g_img_meta_consumer.get_is_stopped()) {
         std::cerr << "Could not save image and metadata: "
                   << "Consumer is stopped.\n";
@@ -374,6 +504,8 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         std::cerr << "input buffer mapinfo failed\n";
         return;
     }
+    
+    
     NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
     gst_buffer_unmap(buf, &inmap);
 
@@ -382,10 +514,11 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
     ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
 
     bool at_least_one_image_saved = false;
-
+    
     for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
          l_frame = l_frame->next) {
         NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
+        
         unsigned source_number = frame_meta->pad_index;
         
         g_img_meta_consumer.lock_source_nb(source_number);
@@ -413,6 +546,7 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         
         g_img_meta_consumer.unlock_source_nb(source_number);
     }
+    limitFps();
 }
 
 /**
@@ -1072,10 +1206,9 @@ int main(int argc, char *argv[]) {
         }
 
         print_runtime_commands();
-
         changemode(1);
 
-        g_timeout_add(40, event_thread_func, nullptr);
+        // g_timeout_add(40, event_thread_func, nullptr);
 
         onStart();
         g_main_loop_run(main_loop);

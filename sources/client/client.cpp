@@ -22,7 +22,8 @@
 #include "nvdsinfer_custom_impl.h"
 
 #define CONNECTION_LOST 0
-#define ORDER_EMPTY -1
+#define NO_CONNECTION -1
+// #define ORDER_EMPTY -1
 
 #define DIGITS_IN_MILLISECONDS 3
 
@@ -34,6 +35,8 @@ using namespace std;
 
 const char* zerosLine = "000";
 vector <string> bboxJsons;
+
+
 
 Client::Client(const NvDsSocket& params)
 {
@@ -91,32 +94,42 @@ void Client::connectToHost(){
     
 }
 
-int Client::imageRequest(){
+RecvestResult Client::recvest(){
     char server_reply[MAX_REPLY_SIZE];
 
+    static string recvbuf = "";
+    static string inTag = "";
+    static int order = 0;
+    static bool isTagInside = false;
+
+    RecvestResult recvRes;
+
     if(!_connected){
-        return -1;
+        recvRes.success = false;
+        return recvRes;
     }
 
     int result = recv(_socket, server_reply , MAX_REPLY_SIZE - 1 , 0);
-    
-    if(result == ORDER_EMPTY){
-        return -1;
-    }
-
-    if(result == CONNECTION_LOST){
+    cout << "recv: " << result << endl;
+    if(result == CONNECTION_LOST || result == NO_CONNECTION){
         connectionLost();
-        return -1;
+        recvRes.success = false;
+        return recvRes;
     }
 
     unsigned int length = result;
-
     server_reply[length] = 0;
+
+    recvRes.success = true;
+    recvRes.message = (string)(char*)(server_reply + 4);
+    return recvRes;
+    
+    
     // string req = server_reply;
     // string startPart = "<getSourceImage frameNum=\"";
     // string endPart = "\"/>";
+    // getSourceImage frameNum=1371219 /
 
-    return 0;
 }
 
 void Client::connectionLost(){
