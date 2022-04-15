@@ -151,6 +151,7 @@ void parseXML(string input){
     static string inTag = "";
     static bool isTagInside = false;
 
+    cout << input << endl;
 
     recvbuf += input;
 
@@ -277,7 +278,10 @@ static bool save_image(const std::string &path,
     
     // int req = imageSender->imageRequest();
 
-    recvCountLock.lock();
+    bool isCLock = recvCountLock.try_lock();
+    if(!isCLock){
+        return false;
+    }
     if(recvCount == 0){
         recvCountLock.unlock();
         return false;
@@ -388,7 +392,13 @@ static bool save_image(const std::string &path,
     imageSender->addMeta("imageColorFormat", "BGR");
     imageSender->addMeta("imageData", cdata);
 
-    recvSendLock.lock();
+    bool isLocked = recvSendLock.try_lock();
+
+    if(!isLocked){
+        cout << "sender is busy" << endl;
+        return false;
+    }
+
     imageSender->sendMessage();
     recvSendLock.unlock();
 

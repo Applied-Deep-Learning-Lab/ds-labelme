@@ -121,7 +121,7 @@ RecvestResult Client::recvest(){
     server_reply[length] = 0;
 
     recvRes.success = true;
-    recvRes.message = server_reply;
+    recvRes.message = (string)(char*)(server_reply + 4);
     return recvRes;
     
     
