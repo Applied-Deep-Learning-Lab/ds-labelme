@@ -1,6 +1,6 @@
 [application]
 enable-perf-measurement=1
-perf-measurement-interval-sec=5
+perf-measurement-interval-sec=1
 
 [label-socket]
 name=InferenceBboxes_LabelMe

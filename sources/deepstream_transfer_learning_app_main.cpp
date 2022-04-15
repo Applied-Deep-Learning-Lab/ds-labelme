@@ -489,53 +489,53 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         return;
     }
 
-    GstMapInfo inmap = GST_MAP_INFO_INIT;
-    if (!gst_buffer_map(buf, &inmap, GST_MAP_READ)) {
-        std::cerr << "input buffer mapinfo failed\n";
-        return;
-    }
+    // GstMapInfo inmap = GST_MAP_INFO_INIT;
+    // if (!gst_buffer_map(buf, &inmap, GST_MAP_READ)) {
+    //     std::cerr << "input buffer mapinfo failed\n";
+    //     return;
+    // }
     
     
-    NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
-    gst_buffer_unmap(buf, &inmap);
+    // NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
+    // gst_buffer_unmap(buf, &inmap);
 
     
-    /// Creating an ImageMetaProducer and registering a consumer.
-    ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
+    // /// Creating an ImageMetaProducer and registering a consumer.
+    // ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
 
-    bool at_least_one_image_saved = false;
+    // bool at_least_one_image_saved = false;
     
-    for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
-         l_frame = l_frame->next) {
-        NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
+    // for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
+    //      l_frame = l_frame->next) {
+    //     NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
         
-        unsigned source_number = frame_meta->pad_index;
+    //     unsigned source_number = frame_meta->pad_index;
         
-        g_img_meta_consumer.lock_source_nb(source_number);
+    //     g_img_meta_consumer.lock_source_nb(source_number);
 
-        /// required for `get_save_full_frame_enabled()`
-        // std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-        // std::ostringstream oss;
-        // oss << std::put_time(std::localtime(&t), "%FT%T%z");
-        // img_producer.generate_image_full_frame_path(frame_meta->pad_index, "tmp.jpg");
-        unsigned obj_counter = 0;
+    //     /// required for `get_save_full_frame_enabled()`
+    //     // std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    //     // std::ostringstream oss;
+    //     // oss << std::put_time(std::localtime(&t), "%FT%T%z");
+    //     // img_producer.generate_image_full_frame_path(frame_meta->pad_index, "tmp.jpg");
+    //     unsigned obj_counter = 0;
 
         
-        imageSender->reconnect();
-        labelSender->reconnect();
-        sendSimpleJson(ip_surf, frame_meta);
+    //     imageSender->reconnect();
+    //     labelSender->reconnect();
+    //     sendSimpleJson(ip_surf, frame_meta);
 
 
-        unsigned dummy_counter = 0;
-        static NvDsObjectMeta dummy_obj_meta;
-        dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
-        dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
-        dummy_obj_meta.rect_params.top = 0;
-        dummy_obj_meta.rect_params.left = 0;
-        save_image(imageFullName, ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
+    //     unsigned dummy_counter = 0;
+    //     static NvDsObjectMeta dummy_obj_meta;
+    //     dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
+    //     dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
+    //     dummy_obj_meta.rect_params.top = 0;
+    //     dummy_obj_meta.rect_params.left = 0;
+    //     save_image(imageFullName, ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
         
-        g_img_meta_consumer.unlock_source_nb(source_number);
-    }
+    //     g_img_meta_consumer.unlock_source_nb(source_number);
+    // }
     limitFps();
 }
 
@@ -707,77 +707,77 @@ event_thread_func(gpointer arg) {
         g_main_loop_quit(main_loop);
         return FALSE;
     }
-    // Check for keyboard input
-    if (!kbhit()) {
-        //continue;
-        return TRUE;
-    }
-    int c = fgetc(stdin);
-    g_print("\n");
+    // // Check for keyboard input
+    // if (!kbhit()) {
+    //     //continue;
+    //     return TRUE;
+    // }
+    // int c = fgetc(stdin);
+    // g_print("\n");
 
-    gint source_id;
-    GstElement *tiler = appCtx[0]->pipeline.tiled_display_bin.tiler;
-    g_object_get(G_OBJECT(tiler), "show-source", &source_id, nullptr);
+    // gint source_id;
+    // GstElement *tiler = appCtx[0]->pipeline.tiled_display_bin.tiler;
+    // g_object_get(G_OBJECT(tiler), "show-source", &source_id, nullptr);
 
-    if (selecting) {
-        if (rrowsel == FALSE) {
-            if (c >= '0' && c <= '9') {
-                rrow = c - '0';
-                if (rrow < appCtx[0]->config.tiled_display_config.rows) {
-                    g_print("--selecting source  row %d--\n", rrow);
-                    rrowsel = TRUE;
-                } else {
-                    g_print("--selected source  row %d out of bound, reenter\n", rrow);
-                }
-            }
-        } else {
-            if (c >= '0' && c <= '9') {
-                unsigned int tile_num_columns = appCtx[0]->config.tiled_display_config.columns;
-                rcol = c - '0';
-                if (rcol < tile_num_columns) {
-                    selecting = FALSE;
-                    rrowsel = FALSE;
-                    source_id = tile_num_columns * rrow + rcol;
-                    g_print("--selecting source  col %d sou=%d--\n", rcol, source_id);
-                    if (source_id >= (gint) appCtx[0]->config.num_source_sub_bins) {
-                        source_id = -1;
-                    } else {
-                        source_ids[0] = source_id;
-                        appCtx[0]->show_bbox_text = TRUE;
-                        g_object_set(G_OBJECT(tiler), "show-source", source_id, nullptr);
-                    }
-                } else {
-                    g_print("--selected source  col %d out of bound, reenter\n", rcol);
-                }
-            }
-        }
-    }
-    switch (c) {
-        case 'h':
-            print_runtime_commands();
-            break;
-        case 'p':
-            for (i = 0; i < num_instances; i++)
-                pause_pipeline(appCtx[i]);
-            break;
-        case 'r':
-            for (i = 0; i < num_instances; i++)
-                resume_pipeline(appCtx[i]);
-            break;
-        case 'q':
-            quit = TRUE;
-            g_main_loop_quit(main_loop);
-            ret = FALSE;
-            break;
-        case 'z':
-            if (source_id == -1 && selecting == FALSE) {
-                g_print("--selecting source --\n");
-                selecting = TRUE;
-            }
-            break;
-        default:
-            break;
-    }
+    // if (selecting) {
+    //     if (rrowsel == FALSE) {
+    //         if (c >= '0' && c <= '9') {
+    //             rrow = c - '0';
+    //             if (rrow < appCtx[0]->config.tiled_display_config.rows) {
+    //                 g_print("--selecting source  row %d--\n", rrow);
+    //                 rrowsel = TRUE;
+    //             } else {
+    //                 g_print("--selected source  row %d out of bound, reenter\n", rrow);
+    //             }
+    //         }
+    //     } else {
+    //         if (c >= '0' && c <= '9') {
+    //             unsigned int tile_num_columns = appCtx[0]->config.tiled_display_config.columns;
+    //             rcol = c - '0';
+    //             if (rcol < tile_num_columns) {
+    //                 selecting = FALSE;
+    //                 rrowsel = FALSE;
+    //                 source_id = tile_num_columns * rrow + rcol;
+    //                 g_print("--selecting source  col %d sou=%d--\n", rcol, source_id);
+    //                 if (source_id >= (gint) appCtx[0]->config.num_source_sub_bins) {
+    //                     source_id = -1;
+    //                 } else {
+    //                     source_ids[0] = source_id;
+    //                     appCtx[0]->show_bbox_text = TRUE;
+    //                     g_object_set(G_OBJECT(tiler), "show-source", source_id, nullptr);
+    //                 }
+    //             } else {
+    //                 g_print("--selected source  col %d out of bound, reenter\n", rcol);
+    //             }
+    //         }
+    //     }
+    // }
+    // switch (c) {
+    //     case 'h':
+    //         print_runtime_commands();
+    //         break;
+    //     case 'p':
+    //         for (i = 0; i < num_instances; i++)
+    //             pause_pipeline(appCtx[i]);
+    //         break;
+    //     case 'r':
+    //         for (i = 0; i < num_instances; i++)
+    //             resume_pipeline(appCtx[i]);
+    //         break;
+    //     case 'q':
+    //         quit = TRUE;
+    //         g_main_loop_quit(main_loop);
+    //         ret = FALSE;
+    //         break;
+    //     case 'z':
+    //         if (source_id == -1 && selecting == FALSE) {
+    //             g_print("--selecting source --\n");
+    //             selecting = TRUE;
+    //         }
+    //         break;
+    //     default:
+    //         break;
+    // }
     return ret;
 }
 
@@ -1198,7 +1198,7 @@ int main(int argc, char *argv[]) {
         print_runtime_commands();
         changemode(1);
 
-        // g_timeout_add(40, event_thread_func, nullptr);
+        g_timeout_add(40, event_thread_func, nullptr);
 
         onStart();
         g_main_loop_run(main_loop);
