@@ -20,21 +20,21 @@
 # DEALINGS IN THE SOFTWARE.
 ################################################################################
 
-CUDA_VER=10.2
-ifeq ($(CUDA_VER),)
-  $(error "CUDA_VER is not set")
-endif 
-
 CXX=g++
 
 APP:= ../ds_v1.out
 
+PLATFORM_SETTINGS:=../platform/paths.sh
+
 TARGET_DEVICE = $(shell gcc -dumpmachine | cut -f1 -d -)
 
-NVDS_VERSION:=6.0
 
-LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/
-APP_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/bin/
+LIB_SO+=$(shell bash $(PLATFORM_SETTINGS) ds-so)
+LIB_PATHS+=$(shell bash $(PLATFORM_SETTINGS) libs)
+LIB_PATHS+=-L$(LIB_SO)
+
+# LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/
+# APP_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/bin/
 
 ifeq ($(TARGET_DEVICE),aarch64)
   CFLAGS:= -DPLATFORM_TEGRA
@@ -42,11 +42,10 @@ endif
 
 
 SRCS:= deepstream_transfer_learning_app_main.cpp image_meta_consumer.cpp image_meta_producer.cpp capture_time_rules.cpp
-#SRCS+= $(wildcard client/*.cpp))
 SRCS+= client/client.cpp
 SRCS+= base64/base64.cpp
 SRCS+= ds_base/deepstream_app.c ds_base/deepstream_app_config_parser.c
-SRCS+= $(wildcard ../lib/includes/apps-common/src/*.c)
+SRCS+= $(wildcard $(shell bash $(PLATFORM_SETTINGS) apps-common)*.c)
 
 
 INCS:= $(wildcard *.h)
@@ -55,22 +54,15 @@ PKGS:= gstreamer-1.0 gstreamer-video-1.0 x11 json-glib-1.0
 
 OBJS:= $(patsubst %.c,%.o, $(patsubst %.cpp,%.o, $(SRCS)))
 
-CFLAGS+= -I ../lib/includes/apps-common/includes \
-		 -I ../lib/includes/includes \
-		 -I ds_base/ -DDS_VERSION_MINOR=0 -DDS_VERSION_MAJOR=5 \
-		 -I /usr/local/cuda-$(CUDA_VER)/include \
-		 -I /usr/include/opencv4
-
-LIBS:= -L/usr/local/cuda-$(CUDA_VER)/lib64/ -lcudart -lstdc++fs
-
-LIBS+= -L$(LIB_INSTALL_DIR) -lopencv_imgcodecs -lopencv_core -lopencv_imgproc -lnvdsgst_meta -lnvds_meta -lnvds_msgbroker -lnvds_batch_jpegenc -lnvdsgst_helper -lnvdsgst_smartrecord -lnvds_utils -lm \
-       -lcuda -lgstrtspserver-1.0 -lnvbufsurface -lpthread -ldl -Wl,-rpath,$(LIB_INSTALL_DIR)
-
+CFLAGS+= $(shell bash $(PLATFORM_SETTINGS) includes)
 CFLAGS+= $(shell pkg-config --cflags $(PKGS))
 
+LIBS+= $(LIB_PATHS) -lcudart -lstdc++fs -lopencv_imgcodecs -lopencv_core -lopencv_imgproc -lnvdsgst_meta -lnvds_meta -lnvds_msgbroker -lnvds_batch_jpegenc -lnvdsgst_helper -lnvdsgst_smartrecord -lnvds_utils -lm \
+       -lcuda -lgstrtspserver-1.0 -lnvbufsurface -lnvbufsurftransform -lpthread -ldl -Wl,-rpath,$(LIB_SO)
 LIBS+= $(shell pkg-config --libs $(PKGS))
 
 all: $(APP)
+
 
 %.o: %.c $(INCS) Makefile
 	$(CC) -g -c -o $@ $(CFLAGS) $<

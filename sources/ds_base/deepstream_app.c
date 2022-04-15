@@ -85,110 +85,16 @@ void printFrameBboxes(NvDsFrameMeta *frame_meta, AppCtx *appCtx){
 		frameInfo.bboxes[i].objectId = 0;
 	};
 	prediction = 0;
-//frameInfo.bboxes.clear();
 	for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
 		NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
 
-		//obj->text_params
-		// char * text = (char *) obj->text_params.display_text;
-		// g_print("%s", text);
 		frameInfo.bboxes[prediction].left   = obj->tracker_bbox_info.org_bbox_coords.left / ratio;
 		frameInfo.bboxes[prediction].top    = obj->tracker_bbox_info.org_bbox_coords.top / ratio;
 		frameInfo.bboxes[prediction].width  = obj->tracker_bbox_info.org_bbox_coords.width / ratio;
 		frameInfo.bboxes[prediction].height = obj->tracker_bbox_info.org_bbox_coords.height / ratio;
 		frameInfo.bboxes[prediction].confidence = obj->tracker_confidence;
 		frameInfo.bboxes[prediction].objectId = obj->object_id;
-			// Checking boxes
-		if (appCtx->config.tracker_config.enable_custom_tracking){
-			float objectCenterX =  obj->detector_bbox_info.org_bbox_coords.left / ratio +  obj->detector_bbox_info.org_bbox_coords.width * 0.5 / ratio;
-			float objectCenterY =  obj->detector_bbox_info.org_bbox_coords.top / ratio +  obj->detector_bbox_info.org_bbox_coords.height*0.5 / ratio;
-			if (last_y < objectCenterY){
-				last_y = objectCenterY;
-				centerlast = objectCenterX;
-			}
-			if (objectCenterX > centerright){
-				centerright = objectCenterX;
-			}
-		}
-			// g_print("tracker's frame:");
-			// printf("%lu", frameInfo.num);
-			// g_print(" ");
-			// g_print("label:");
-			// printf("%s", obj->obj_label);
-			// g_print(" ");
-			// g_print("left:");
-			// printf("%.2f", frameInfo.bboxes[prediction].left);
-			// g_print(" ");
-			// g_print("top:");
-			// printf("%.2f", frameInfo.bboxes[prediction].top);
-			// g_print(" ");
-			// g_print("width:");
-			// printf("%.2f", frameInfo.bboxes[prediction].width);
-			// g_print(" ");
-			// g_print("height:");
-			// printf("%.2f", frameInfo.bboxes[prediction].height);
-			// g_print(" ");
-			// g_print("height of detector:");
-			// printf("%.2f", obj->detector_bbox_info.org_bbox_coords.height/ratio);
-			// g_print(" ");
-			// g_print("height of rect:");
-			// printf("%.2f", obj->rect_params.height/ratio);
-			// g_print(" ");
-			// g_print("Id:");
-			// printf("%lu", frameInfo.bboxes[prediction].objectId);
-			// g_print("\n");
-			prediction++;
-
-			/*
-			TBboxInfo bboxInfo;
-			bboxInfo.left   = obj->tracker_bbox_info.org_bbox_coords.left;
-			bboxInfo.top    = obj->tracker_bbox_info.org_bbox_coords.top;
-			bboxInfo.width  = obj->tracker_bbox_info.org_bbox_coords.width;
-			bboxInfo.height = obj->tracker_bbox_info.org_bbox_coords.height;
-			bboxInfo.confidence = obj->tracker_confidence;
-				// Here confidence stores tracker confidence value for tracker output
-			bboxInfo.objectId = obj->object_id;
-
-	//      printf ("%s %lu  (%.1f, %.1f)-(%.1f, %.1f) %.3f\n",
-	//          obj->obj_label, id, left, top, right, bottom, confidence);
-	//      bboxCount++;
-			frameInfo.bboxes.push_back(bboxInfo);
-			*/
 	}
-		// Missing bullet count
-	if (appCtx->config.tracker_config.enable_custom_tracking){
-		for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
-			NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
-
-			if (obj->class_id == MISSING_BULLET_CLASS){
-				float objectCenterY = obj->detector_bbox_info.org_bbox_coords.top / ratio + obj->detector_bbox_info.org_bbox_coords.height * 0.5 / ratio;
-				// g_print(" class id : %i \n",obj->class_id );
-				// g_print(" objectCenterY: %f < lastMissingBulletY: %f - BOX_OFFSET_THRESHOLD: %f && objectCenterY: %f < last_y: %f \n", objectCenterY, lastMissingBulletY, BOX_OFFSET_THRESHOLD, objectCenterY,  last_y);
-
-				if((objectCenterY < lastMissingBulletY - BOX_OFFSET_THRESHOLD)&&(objectCenterY < last_y)){
-				//   g_print("detect missing position fadssfasf: %i \n", ++missingBulletCount);
-					//sendMessage("detect missing position: " + to_string(missingBulletCount) + "\n");
-				}
-				lastMissingBulletY = objectCenterY;
-			}
-		}
-	}
-	if((frame_meta->obj_meta_list != NULL)&(appCtx->config.tracker_config.enable_custom_tracking)){
-		static int framesLeft = 0;
-		float distance = centerright - centerlast;
-
-		if(framesLeft == 0){
-			if(distance > BULLET_THROW_THRESHOLD){
-				framesLeft = FRAMES_DELAY;
-				// g_print("detect bulletfasfs: %i\n",++bulletCount);
-				//sendMessage("detect bullet: " + to_string(bulletCount) + "\n");
-
-			}
-		}else{
-				framesLeft--;
-		}
-	}
-
 }
 
 // Works

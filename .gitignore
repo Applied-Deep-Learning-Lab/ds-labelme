@@ -3,4 +3,6 @@
 *.log
 data/
 lib/
+.vscode/
 lib
+platform/
