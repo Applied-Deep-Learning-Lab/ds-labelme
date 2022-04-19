@@ -44,6 +44,7 @@ endif
 SRCS:= deepstream_transfer_learning_app_main.cpp image_meta_consumer.cpp image_meta_producer.cpp capture_time_rules.cpp
 SRCS+= client/client.cpp
 SRCS+= base64/base64.cpp
+SRCS+= logger.cpp
 SRCS+= ds_base/deepstream_app.c ds_base/deepstream_app_config_parser.c
 SRCS+= $(wildcard $(shell bash $(PLATFORM_SETTINGS) apps-common)*.c)
 

@@ -41,6 +41,7 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <atomic>
 
 // OpenCV
 #include <opencv2/imgcodecs.hpp>
@@ -55,6 +56,7 @@
 // Additional modules
 #include "client/client.h"
 #include "base64/base64.h"
+#include "logger.h"
 
 using namespace std;
 
@@ -84,9 +86,12 @@ constexpr unsigned MAX_INSTANCES = 128;
 Client* labelSender;
 Client* imageSender;
 thread* recvestLoop;
+Logger logger(true);
 
-static int recvCount = 0;
-std::mutex recvCountLock;
+static atomic<int> recvCount { 0 };
+static atomic<bool> isSimpleJsonSend { true };
+static atomic<bool> isImageJsonSend { true };
+
 std::mutex recvSendLock;
 bool stop = false;
 
@@ -136,22 +141,10 @@ GOptionEntry entries[] = {
 };
 
 
-void test(){
-    while (true)
-    {
-        cout << "hello from thread" << endl;
-        this_thread::sleep_for(1000ms);
-    }
-    
-}
-
-
 void parseXML(string input){
     static string recvbuf = "";
     static string inTag = "";
     static bool isTagInside = false;
-
-    cout << input << endl;
 
     recvbuf += input;
 
@@ -176,14 +169,12 @@ void parseXML(string input){
             if(tagStart != string::npos){
                 isTagInside = false;
                 inTag += recvbuf.substr(0, tagStart);
-                cout << "Recvest: " << inTag << endl;
+                logger.printLog("recvest: " + inTag);
                 recvbuf = recvbuf.erase(0, tagStart + 1);
                 
                 string test = inTag.substr(0, 4);
-                if(inTag.substr(0, 4) != "head"){
-                    recvCountLock.lock();
-                    recvCount++;
-                    recvCountLock.unlock();
+                if(inTag.substr(0, 14) == "getSourceImage"){ // <getSourceImage>
+                    recvCount.fetch_add(1);
                 }
                 inTag = "";
 
@@ -198,12 +189,12 @@ void parseXML(string input){
 void recieveImage(Client* client){
     while (!stop)
     {
-        // cout << "try_recv" << endl;
         recvSendLock.lock();
         RecvestResult recvest = client->recvest();
         recvSendLock.unlock();
-        // cout << "recv: " << recv.success << endl;
+        
         if(recvest.success){
+            // logger.printLog("recv: " + recvest.message);
             parseXML(recvest.message);   
         }
 
@@ -259,6 +250,40 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
 
 }
 
+
+static void
+fpsLogger(gpointer context, NvDsAppPerfStruct *str) {
+    AppCtx *appCtx = (AppCtx *) context;
+    guint numf = (num_instances == 1) ? str->num_instances : num_instances;
+
+    double fps = str->fps[0];
+    double fpsAvg = str->fps_avg[0];
+    static double lastFps = -1000;
+
+    g_mutex_lock(&fps_lock);
+    if( abs(lastFps - fps) > 5){
+        if(fps > 1){
+            logger.printLog((string)"fps: " + to_string(fps));
+        } else {
+            logger.printWarning((string)"low fps: " + to_string(fps));
+            if(isSimpleJsonSend == false){
+                logger.printError("Simple json send hang-up");
+                labelSender->connectionLost();
+                logger.printLog("Simple json client reconnection");
+            }
+            if(isImageJsonSend == false){
+                logger.printError("Image json send hang-up");
+                imageSender->connectionLost();
+                logger.printLog("Image json client reconnection");
+            }
+        }
+        
+        lastFps = fps;
+    }
+    g_mutex_unlock(&fps_lock);
+
+}
+
 /// Will save an image cropped with the dimension specified by obj_meta
 /// If the path is too long, the save will not occur and an error message will be
 /// diplayed.
@@ -274,21 +299,13 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
 static bool save_image(const std::string &path,
                        NvBufSurface *ip_surf, NvDsObjectMeta *obj_meta,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
-    
-    
-    // int req = imageSender->imageRequest();
 
-    bool isCLock = recvCountLock.try_lock();
-    if(!isCLock){
+    
+    if(recvCount.load() == 0){
         return false;
     }
-    if(recvCount == 0){
-        recvCountLock.unlock();
-        return false;
-    }
-    recvCount--;
-    recvCountLock.unlock();
-    cout << "Request image" << endl;
+    recvCount.fetch_sub(1);
+    logger.printLog("Request image");
 
     int srcWidth = ip_surf->surfaceList[0].width;
     int srcHeight = ip_surf->surfaceList[0].height;
@@ -316,13 +333,8 @@ static bool save_image(const std::string &path,
         dst_rect.height = (SEND_IMAGE_WIDTH - dst_rect.width) / 2;
     }
 
-
-
-
-   
-
     NvBufSurfTransformParams transform;
-    transform.dst_rect = &dst_rect;
+    transform.dst_rect = &src_rect;
     transform.src_rect = &src_rect;
     transform.transform_filter = NvBufSurfTransformInter_Nearest;
     transform.transform_flip = NvBufSurfTransform_None;
@@ -334,8 +346,8 @@ static bool save_image(const std::string &path,
     NvBufSurfaceCreateParams nvbufsurface_create_params;
 	
 	nvbufsurface_create_params.gpuId  = ip_surf->gpuId;
-	nvbufsurface_create_params.width  = (guint) SEND_IMAGE_WIDTH;
-	nvbufsurface_create_params.height = (guint) SEND_IMAGE_HEIGHT;
+	nvbufsurface_create_params.width  = (guint) srcWidth;
+	nvbufsurface_create_params.height = (guint) srcHeight;
 	nvbufsurface_create_params.size = 0;
 	nvbufsurface_create_params.isContiguous = true;
 	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGRA;
@@ -348,7 +360,7 @@ static bool save_image(const std::string &path,
     
     auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
         if(tranformResult != NvBufSurfTransformError_Success) {
-            std::cerr << "transform failed\n";
+            logger.printError("transform failed");
             return false;
     }
 
@@ -395,12 +407,16 @@ static bool save_image(const std::string &path,
     bool isLocked = recvSendLock.try_lock();
 
     if(!isLocked){
-        cout << "sender is busy" << endl;
+        logger.printWarning("sender is busy");
         return false;
     }
 
+    isImageJsonSend.store(false);
     imageSender->sendMessage();
+    isImageJsonSend.store(true);
+
     recvSendLock.unlock();
+    logger.printLog("image sended");
 
     return true;
 }
@@ -408,7 +424,9 @@ static bool save_image(const std::string &path,
 void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     bboxProcess(*labelSender, frame_meta);
     addMeta(*labelSender, ip_surf, frame_meta);
+    isSimpleJsonSend.store(false);
     labelSender->sendMessage();
+    isSimpleJsonSend.store(true);
 }
 
 void limitFps(){
@@ -499,53 +517,53 @@ after_pgie_image_meta_save(AppCtx *appCtx, GstBuffer *buf,
         return;
     }
 
-    // GstMapInfo inmap = GST_MAP_INFO_INIT;
-    // if (!gst_buffer_map(buf, &inmap, GST_MAP_READ)) {
-    //     std::cerr << "input buffer mapinfo failed\n";
-    //     return;
-    // }
+    GstMapInfo inmap = GST_MAP_INFO_INIT;
+    if (!gst_buffer_map(buf, &inmap, GST_MAP_READ)) {
+        std::cerr << "input buffer mapinfo failed\n";
+        return;
+    }
     
     
-    // NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
-    // gst_buffer_unmap(buf, &inmap);
+    NvBufSurface *ip_surf = (NvBufSurface *) inmap.data;
+    gst_buffer_unmap(buf, &inmap);
 
     
-    // /// Creating an ImageMetaProducer and registering a consumer.
-    // ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
+    /// Creating an ImageMetaProducer and registering a consumer.
+    ImageMetaProducer img_producer = ImageMetaProducer(g_img_meta_consumer);
 
-    // bool at_least_one_image_saved = false;
+    bool at_least_one_image_saved = false;
     
-    // for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
-    //      l_frame = l_frame->next) {
-    //     NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
+    for (NvDsMetaList *l_frame = batch_meta->frame_meta_list; l_frame != nullptr;
+         l_frame = l_frame->next) {
+        NvDsFrameMeta *frame_meta = static_cast<NvDsFrameMeta *>(l_frame->data);
         
-    //     unsigned source_number = frame_meta->pad_index;
+        unsigned source_number = frame_meta->pad_index;
         
-    //     g_img_meta_consumer.lock_source_nb(source_number);
+        g_img_meta_consumer.lock_source_nb(source_number);
 
-    //     /// required for `get_save_full_frame_enabled()`
-    //     // std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
-    //     // std::ostringstream oss;
-    //     // oss << std::put_time(std::localtime(&t), "%FT%T%z");
-    //     // img_producer.generate_image_full_frame_path(frame_meta->pad_index, "tmp.jpg");
-    //     unsigned obj_counter = 0;
+        /// required for `get_save_full_frame_enabled()`
+        // std::time_t t = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+        // std::ostringstream oss;
+        // oss << std::put_time(std::localtime(&t), "%FT%T%z");
+        // img_producer.generate_image_full_frame_path(frame_meta->pad_index, "tmp.jpg");
+        unsigned obj_counter = 0;
 
         
-    //     imageSender->reconnect();
-    //     labelSender->reconnect();
-    //     sendSimpleJson(ip_surf, frame_meta);
+        imageSender->reconnect();
+        labelSender->reconnect();
+        sendSimpleJson(ip_surf, frame_meta);
 
 
-    //     unsigned dummy_counter = 0;
-    //     static NvDsObjectMeta dummy_obj_meta;
-    //     dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
-    //     dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
-    //     dummy_obj_meta.rect_params.top = 0;
-    //     dummy_obj_meta.rect_params.left = 0;
-    //     save_image(imageFullName, ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
+        unsigned dummy_counter = 0;
+        static NvDsObjectMeta dummy_obj_meta;
+        dummy_obj_meta.rect_params.width = ip_surf->surfaceList[frame_meta->batch_id].width;
+        dummy_obj_meta.rect_params.height = ip_surf->surfaceList[frame_meta->batch_id].height;
+        dummy_obj_meta.rect_params.top = 0;
+        dummy_obj_meta.rect_params.left = 0;
+        save_image(imageFullName, ip_surf, &dummy_obj_meta, frame_meta, obj_counter);
         
-    //     g_img_meta_consumer.unlock_source_nb(source_number);
-    // }
+        g_img_meta_consumer.unlock_source_nb(source_number);
+    }
     limitFps();
 }
 
@@ -588,7 +606,7 @@ perf_cb(gpointer context, NvDsAppPerfStruct *str) {
         }
     }
 
-    num_fps_inst++;
+num_fps_inst++;
     if (num_fps_inst < num_instances) {
         g_mutex_unlock(&fps_lock);
         return;
@@ -606,7 +624,7 @@ perf_cb(gpointer context, NvDsAppPerfStruct *str) {
     }
     header_print_cnt++;
     g_print("**PERF: ");
-    for (i = 0; i < numf; i++) {
+    for (i = 0; i < numf; i++) { 
         g_print("%.2f (%.2f)\t", fps[i], fps_avg[i]);
     }
     g_print("\n");
@@ -1031,7 +1049,7 @@ int main(int argc, char *argv[]) {
 
         for (i = 0; i < num_instances; i++) {
             if (!create_pipeline(appCtx[i], after_pgie_image_meta_save,
-                                 nullptr, perf_cb, overlay_graphics)) {
+                                 nullptr, fpsLogger, overlay_graphics)) {
                 NVGSTDS_ERR_MSG_V("Failed to create pipeline");
                 return_value = -1;
                 should_goto_done = true;

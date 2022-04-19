@@ -43,10 +43,11 @@ public:
     void reconnect();
 
     void sendMessage();
+    void connectionLost();
 
 private:
 
-    void connectionLost();
+    
 
     std::string _ip;
     int _port;
