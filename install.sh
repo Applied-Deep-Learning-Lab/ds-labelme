@@ -8,9 +8,12 @@ done
 
 rm -rf platform
 mkdir platform
-cd platform
 
+cd platform
 cp -r ../configs/base/ config
 cp ../platform-paths/$platform.sh paths.sh
-cp -r /opt/nvidia/deepstream/deepstream/sources/includes/ lib/
-cp -r /opt/nvidia/deepstream/deepstream/sources/apps/apps-common/ lib/
+cd ../
+
+mkdir lib/
+cp -r /opt/nvidia/deepstream/deepstream/sources/includes lib/
+cp -r /opt/nvidia/deepstream/deepstream/sources/apps/apps-common lib/
