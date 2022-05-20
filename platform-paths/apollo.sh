@@ -17,8 +17,8 @@ then
 # include paths
 echo "\
 \
--I ../lib/includes/apps-common/includes \
--I ../lib/includes/includes \
+-I ../lib/apps-common/includes \
+-I ../lib/includes \
 -I ds_base/ -DDS_VERSION_MINOR=0 -DDS_VERSION_MAJOR=5 \
 -I /usr/local/cuda-$CUDA_VER/include \
 "
@@ -27,7 +27,7 @@ fi
 if [ "$1" == "apps-common" ]
 then
 # apps-common dir
-echo "/opt/nvidia/deepstream/deepstream/sources/apps/apps-common/src/"
+echo "../lib/apps-common/src/"
 fi
 
 if [ "$1" == "ds-so" ]
