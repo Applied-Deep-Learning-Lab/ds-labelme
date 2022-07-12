@@ -65,10 +65,10 @@ const string imageName = "tmp.jpg";
 const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
 const string imageFullName = pathToImage + imageName;
 
-static const int FPS_LIMIT = 30;
+static int FPS_LIMIT = 20;
 
 
-static constexpr auto DELAY_FOR_LIMIT = std::chrono::milliseconds(1000 / FPS_LIMIT);
+
 
 static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 640;
 static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 480;
@@ -233,7 +233,10 @@ void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
         bbox.label  = obj->text_params.display_text;
 
         client.addBBox(bbox);
+        
     }
+    
+    
 }
 
 void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
@@ -256,12 +259,14 @@ fpsLogger(gpointer context, NvDsAppPerfStruct *str) {
     AppCtx *appCtx = (AppCtx *) context;
     guint numf = (num_instances == 1) ? str->num_instances : num_instances;
 
+    static auto threshold = appCtx[0].config.fps.fps_show_threshold; 
+
     double fps = str->fps[0];
     double fpsAvg = str->fps_avg[0];
     static double lastFps = -1000;
 
     g_mutex_lock(&fps_lock);
-    if( abs(lastFps - fps) > 5){
+    if( abs(lastFps - fps) > threshold){
         if(fps > 1){
             logger.printLog((string)"fps: " + to_string(fps));
         } else {
@@ -432,12 +437,13 @@ void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
 void limitFps(){
     
     static auto last = std::chrono::high_resolution_clock::now();
+    static auto delay = std::chrono::milliseconds(1000 / appCtx[0]->config.fps.max_fps);
     auto now = std::chrono::high_resolution_clock::now();
     
     std::chrono::duration<double, std::milli> processTime = now - last;
 
-    if(processTime < DELAY_FOR_LIMIT){
-        std::this_thread::sleep_for(DELAY_FOR_LIMIT - processTime);
+    if(processTime < delay){
+        std::this_thread::sleep_for(delay - processTime);
     }
     last = std::chrono::high_resolution_clock::now();
 }
