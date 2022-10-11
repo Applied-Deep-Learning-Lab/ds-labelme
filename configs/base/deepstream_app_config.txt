@@ -1,6 +1,6 @@
 [application]
 enable-perf-measurement=1
-perf-measurement-interval-sec=1
+perf-measurement-interval-sec=5
 
 [label-socket]
 name=InferenceBboxes_LabelMe
@@ -27,10 +27,10 @@ enable=0
 #Type - 1=CameraV4L2 2=URI 3=MultiURI 4=RTSP 5=CSI
 type=1
 uri=rtsp:stream
-camera-fps-n=60
+camera-fps-n=130
 camera-fps-d=1
-camera-width=1280
-camera-height=720
+camera-width=640
+camera-height=480
 num-sources=1
 #gpu-id=0
 cudadec-memtype=0
@@ -43,7 +43,7 @@ cudadec-memtype=0
 enable=1
 #Type - 1=CameraV4L2 2=URI 3=MultiURI 4=RTSP 5=CSI
 type=2
-uri=file://../../data/video/vid20220121_124815_SleepOnFrameBufOverflow.avi
+uri=file://../../data/video.avi
 cudadec-memtype=0
 
 [source2]
@@ -94,7 +94,7 @@ bitrate=6000000
 #H265 Profile - 0=Main 1=Main10
 profile=0
 # set below properties in case of RTSPStreaming
-rtsp-port=7704 # rtsp://apollo2.ci.nsu.ru:7774/ds-test
+rtsp-port=8554 # rtsp://apollo2.ci.nsu.ru:7774/ds-test
 udp-port=5400
 
 [sink3]
@@ -137,8 +137,8 @@ live-source=1
 attach-sys-ts-as-ntp=1
 batch-size=1
 batched-push-timeout=40000
-width=1920
-height=1080
+width=640
+height=480
 enable-padding=1
 nvbuf-memory-type=0
 gpu-id=0
@@ -148,31 +148,29 @@ enable=1
 gpu-id=0
 gie-unique-id=1
 nvbuf-memory-type=0
-config-file=/root/Mikhail/DeepStream/labelmeSender_Bubbles/config_infer_pr_yV5_bubbles_Apollo.txt
+config-file=../../data/nets/bubbles/config_infer_primary_yoloV5.txt
 #config-file=yolov5_triton.txt
 #(0): nvinfer; (1): nvinferserver
 plugin-type=0
 
 [tracker]
 enable=1
-enable-custom-tracking=1
 # For NvDCF and DeepSORT tracker, tracker-width and tracker-height must be a multiple of 32, respectively
 tracker-width=640
 tracker-height=640
 ll-lib-file=/opt/nvidia/deepstream/deepstream-6.0/lib/libnvds_nvmultiobjecttracker.so
-ll-config-file=/root/ProgriX/projects/ds-labelme/configs/apollo/tracker.yml
+ll-config-file=tracker.yml
 gpu-id=0
 enable-batch-process=1
 enable-past-frame=1
 display-tracking-id=1
-display-mask=1
 
 [img-save]
 enable=1
-output-folder-path=data
+output-folder-path=data/
 save-img-cropped-obj=0
 save-img-full-frame=1
-frame-to-skip-rules-path=configs/apollo/capture_time_rules.csv
+frame-to-skip-rules-path=configs/base/capture_time_rules.csv
 second-to-skip-interval=5
 min-confidence=0.2
 max-confidence=1.0

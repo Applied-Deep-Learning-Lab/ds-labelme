@@ -29,15 +29,22 @@
 #define CONFIG_GROUP_APP_GIE_OUTPUT_DIR "gie-kitti-output-dir"
 #define CONFIG_GROUP_APP_GIE_TRACK_OUTPUT_DIR "kitti-track-output-dir"
 
+// [*-socket]
+#define CONFIG_GROUP_LABEL_SOCKET "label-socket"
+#define CONFIG_GROUP_IMAGE_SOCKET "image-socket"
+
 #define CONFIG_GROUP_SOCKET_NAME "name"
 #define CONFIG_GROUP_SOCKET_IP "ip"
 #define CONFIG_GROUP_SOCKET_PORT "port"
 
-#define CONFIG_GROUP_LABEL_SOCKET "label-socket"
-#define CONFIG_GROUP_IMAGE_SOCKET "image-socket"
-
 #define SOCKET_LABEL 0
 #define SOCKET_IMAGE 1
+
+// [input-video]
+#define CONFIG_GROUP_FPS "fps"
+
+#define CONFIG_GROUP_FPS_MAX              "max-fps"
+#define CONFIG_GROUP_FPS_SHOW_THRESHOLD    "fps-show-threshold"
 
 
 #define CONFIG_GROUP_TESTS "tests"
@@ -317,6 +324,55 @@ done:
   return ret;
 }
 
+static gboolean
+parse_fps (NvDsConfig *config, GKeyFile *key_file, gchar *cfg_file_path, guint8 socketType)
+{
+  gboolean ret = FALSE;
+  gchar **keys = NULL;
+  gchar **key = NULL;
+  GError *error = NULL;
+
+  config->fps.max_fps           = 0;
+  config->fps.fps_show_threshold = 3.0;
+
+  keys = g_key_file_get_keys (key_file, CONFIG_GROUP_FPS, NULL, &error);
+  CHECK_ERROR (error);
+
+  for (key = keys; *key; key++) {
+
+    if (!g_strcmp0 (*key, CONFIG_GROUP_FPS_MAX)) {
+      config->fps.max_fps =
+          g_key_file_get_integer (key_file, CONFIG_GROUP_FPS,
+          CONFIG_GROUP_FPS_MAX, &error);
+      CHECK_ERROR (error);
+    } 
+    else if (!g_strcmp0 (*key, CONFIG_GROUP_FPS_SHOW_THRESHOLD)) {
+      config->fps.fps_show_threshold =
+          g_key_file_get_double (key_file, CONFIG_GROUP_FPS,
+          CONFIG_GROUP_FPS_SHOW_THRESHOLD, &error);
+      CHECK_ERROR (error);
+    } 
+    else {
+      NVGSTDS_WARN_MSG_V ("Unknown key '%s' for group [%s]", *key,
+                          CONFIG_GROUP_FPS);
+    }
+  }
+
+  ret = TRUE;
+done:
+  if (error) {
+    g_error_free (error);
+  }
+  if (keys) {
+    g_strfreev (keys);
+  }
+  if (!ret) {
+    NVGSTDS_ERR_MSG_V ("%s failed", __func__);
+  }
+  return ret;
+}
+
+
 
 gboolean
 parse_config_file (NvDsConfig *config, gchar *cfg_file_path)
@@ -376,6 +432,10 @@ parse_config_file (NvDsConfig *config, gchar *cfg_file_path)
     GST_CAT_DEBUG (APP_CFG_PARSER_CAT, "Parsing group: %s", *group);
     if (!g_strcmp0 (*group, CONFIG_GROUP_APP)) {
       parse_err = !parse_app (config, cfg_file, cfg_file_path);
+    }
+
+    if (!g_strcmp0 (*group, CONFIG_GROUP_FPS)) {
+      parse_err = !parse_fps (config, cfg_file, cfg_file_path, SOCKET_LABEL);
     }
 
     if (!g_strcmp0 (*group, CONFIG_GROUP_LABEL_SOCKET)) {

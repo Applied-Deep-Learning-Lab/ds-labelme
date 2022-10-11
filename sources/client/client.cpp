@@ -27,7 +27,7 @@
 
 #define DIGITS_IN_MILLISECONDS 3
 
-#define MAX_REPLY_SIZE 200
+#define MAX_REPLY_SIZE 1000
 #define RECONNECT_TIME_MILLISECONDS 1000
 
 
@@ -110,7 +110,13 @@ RecvestResult Client::recvest(){
     }
 
     int result = recv(_socket, server_reply , MAX_REPLY_SIZE - 1 , 0);
-    cout << "recv: " << result << endl;
+    // cout << "rdataget" << endl;
+    // for (int i = 0; i < result; i++)
+    // {
+    //     cout << server_reply[i];
+    // }
+    // cout << endl << "rdataend" << endl;
+
     if(result == CONNECTION_LOST || result == NO_CONNECTION){
         connectionLost();
         recvRes.success = false;

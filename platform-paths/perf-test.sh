@@ -1,7 +1,7 @@
 # Change paths and rename to platform-paths
 
 NVDS_VERSION=6.0
-CUDA_VER=10.2
+CUDA_VER=11.4
 
 if [ "$1" == "libs" ]
 then
@@ -17,18 +17,17 @@ then
 # include paths
 echo "\
 \
--I ../lib/apps-common/includes \
--I ../lib/includes \
+-I ../lib/includes/apps-common/includes \
+-I ../lib/includes/includes \
 -I ds_base/ -DDS_VERSION_MINOR=0 -DDS_VERSION_MAJOR=5 \
 -I /usr/local/cuda-$CUDA_VER/include \
--I /usr/include/opencv4/ \
 "
 fi
 
 if [ "$1" == "apps-common" ]
 then
 # apps-common dir
-echo "../lib/apps-common/src/"
+echo "/opt/nvidia/deepstream/deepstream/sources/apps/apps-common/src/"
 fi
 
 if [ "$1" == "ds-so" ]

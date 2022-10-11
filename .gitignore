@@ -6,3 +6,5 @@ lib/
 .vscode/
 lib
 platform/
+log.txt
+error.txt

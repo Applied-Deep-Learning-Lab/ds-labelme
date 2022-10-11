@@ -128,6 +128,12 @@ typedef struct
 
 typedef struct
 {
+  guint16 max_fps;
+  gdouble fps_show_threshold;
+}NvDsFps;
+
+typedef struct
+{
   gboolean enable_perf_measurement;
   gint file_loop;
   gboolean source_list_enabled;
@@ -159,6 +165,8 @@ typedef struct
 
   NvDsSocket image_socket;
   NvDsSocket label_socket;
+
+  NvDsFps fps;
 
 } NvDsConfig;
 

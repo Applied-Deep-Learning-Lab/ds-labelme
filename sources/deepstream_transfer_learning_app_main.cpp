@@ -41,6 +41,7 @@
 #include <thread>
 #include <mutex>
 #include <chrono>
+#include <atomic>
 
 // OpenCV
 #include <opencv2/imgcodecs.hpp>
@@ -55,6 +56,7 @@
 // Additional modules
 #include "client/client.h"
 #include "base64/base64.h"
+#include "logger.h"
 
 using namespace std;
 
@@ -63,10 +65,10 @@ const string imageName = "tmp.jpg";
 const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
 const string imageFullName = pathToImage + imageName;
 
-static const int FPS_LIMIT = 30;
+static int FPS_LIMIT = 20;
 
 
-static constexpr auto DELAY_FOR_LIMIT = std::chrono::milliseconds(1000 / FPS_LIMIT);
+
 
 static constexpr unsigned DEFAULT_X_WINDOW_WIDTH = 640;
 static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 480;
@@ -84,9 +86,12 @@ constexpr unsigned MAX_INSTANCES = 128;
 Client* labelSender;
 Client* imageSender;
 thread* recvestLoop;
+Logger logger(true);
 
-static int recvCount = 0;
-std::mutex recvCountLock;
+static atomic<int> recvCount { 0 };
+static atomic<bool> isSimpleJsonSend { true };
+static atomic<bool> isImageJsonSend { true };
+
 std::mutex recvSendLock;
 bool stop = false;
 
@@ -136,22 +141,10 @@ GOptionEntry entries[] = {
 };
 
 
-void test(){
-    while (true)
-    {
-        cout << "hello from thread" << endl;
-        this_thread::sleep_for(1000ms);
-    }
-    
-}
-
-
 void parseXML(string input){
     static string recvbuf = "";
     static string inTag = "";
     static bool isTagInside = false;
-
-    cout << input << endl;
 
     recvbuf += input;
 
@@ -176,14 +169,12 @@ void parseXML(string input){
             if(tagStart != string::npos){
                 isTagInside = false;
                 inTag += recvbuf.substr(0, tagStart);
-                cout << "Recvest: " << inTag << endl;
+                logger.printLog("recvest: " + inTag);
                 recvbuf = recvbuf.erase(0, tagStart + 1);
                 
                 string test = inTag.substr(0, 4);
-                if(inTag.substr(0, 4) != "head"){
-                    recvCountLock.lock();
-                    recvCount++;
-                    recvCountLock.unlock();
+                if(inTag.substr(0, 14) == "getSourceImage"){ // <getSourceImage>
+                    recvCount.fetch_add(1);
                 }
                 inTag = "";
 
@@ -198,12 +189,12 @@ void parseXML(string input){
 void recieveImage(Client* client){
     while (!stop)
     {
-        // cout << "try_recv" << endl;
         recvSendLock.lock();
         RecvestResult recvest = client->recvest();
         recvSendLock.unlock();
-        // cout << "recv: " << recv.success << endl;
+        
         if(recvest.success){
+            // logger.printLog("recv: " + recvest.message);
             parseXML(recvest.message);   
         }
 
@@ -242,7 +233,10 @@ void bboxProcess(Client& client, NvDsFrameMeta *frame_meta){
         bbox.label  = obj->text_params.display_text;
 
         client.addBBox(bbox);
+        
     }
+    
+    
 }
 
 void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
@@ -256,6 +250,42 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     time_t now = chrono::duration_cast<chrono::nanoseconds>(chrono::high_resolution_clock::now().time_since_epoch()).count();
     client.addMetaTime("sendTime", now);
     client.addMeta("deltaMilliseconds", (now - frame_meta->ntp_timestamp) / 1000000);
+
+}
+
+
+static void
+fpsLogger(gpointer context, NvDsAppPerfStruct *str) {
+    AppCtx *appCtx = (AppCtx *) context;
+    guint numf = (num_instances == 1) ? str->num_instances : num_instances;
+
+    static auto threshold = appCtx[0].config.fps.fps_show_threshold; 
+
+    double fps = str->fps[0];
+    double fpsAvg = str->fps_avg[0];
+    static double lastFps = -1000;
+
+    g_mutex_lock(&fps_lock);
+    if( abs(lastFps - fps) > threshold){
+        if(fps > 1){
+            logger.printLog((string)"fps: " + to_string(fps));
+        } else {
+            logger.printWarning((string)"low fps: " + to_string(fps));
+            if(isSimpleJsonSend == false){
+                logger.printError("Simple json send hang-up");
+                labelSender->connectionLost();
+                logger.printLog("Simple json client reconnection");
+            }
+            if(isImageJsonSend == false){
+                logger.printError("Image json send hang-up");
+                imageSender->connectionLost();
+                logger.printLog("Image json client reconnection");
+            }
+        }
+        
+        lastFps = fps;
+    }
+    g_mutex_unlock(&fps_lock);
 
 }
 
@@ -274,21 +304,13 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
 static bool save_image(const std::string &path,
                        NvBufSurface *ip_surf, NvDsObjectMeta *obj_meta,
                        NvDsFrameMeta *frame_meta, unsigned &obj_counter) {
-    
-    
-    // int req = imageSender->imageRequest();
 
-    bool isCLock = recvCountLock.try_lock();
-    if(!isCLock){
+    
+    if(recvCount.load() == 0){
         return false;
     }
-    if(recvCount == 0){
-        recvCountLock.unlock();
-        return false;
-    }
-    recvCount--;
-    recvCountLock.unlock();
-    cout << "Request image" << endl;
+    recvCount.fetch_sub(1);
+    logger.printLog("Request image");
 
     int srcWidth = ip_surf->surfaceList[0].width;
     int srcHeight = ip_surf->surfaceList[0].height;
@@ -316,13 +338,8 @@ static bool save_image(const std::string &path,
         dst_rect.height = (SEND_IMAGE_WIDTH - dst_rect.width) / 2;
     }
 
-
-
-
-   
-
     NvBufSurfTransformParams transform;
-    transform.dst_rect = &dst_rect;
+    transform.dst_rect = &src_rect;
     transform.src_rect = &src_rect;
     transform.transform_filter = NvBufSurfTransformInter_Nearest;
     transform.transform_flip = NvBufSurfTransform_None;
@@ -334,8 +351,8 @@ static bool save_image(const std::string &path,
     NvBufSurfaceCreateParams nvbufsurface_create_params;
 	
 	nvbufsurface_create_params.gpuId  = ip_surf->gpuId;
-	nvbufsurface_create_params.width  = (guint) SEND_IMAGE_WIDTH;
-	nvbufsurface_create_params.height = (guint) SEND_IMAGE_HEIGHT;
+	nvbufsurface_create_params.width  = (guint) srcWidth;
+	nvbufsurface_create_params.height = (guint) srcHeight;
 	nvbufsurface_create_params.size = 0;
 	nvbufsurface_create_params.isContiguous = true;
 	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGRA;
@@ -348,7 +365,7 @@ static bool save_image(const std::string &path,
     
     auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
         if(tranformResult != NvBufSurfTransformError_Success) {
-            std::cerr << "transform failed\n";
+            logger.printError("transform failed");
             return false;
     }
 
@@ -395,12 +412,16 @@ static bool save_image(const std::string &path,
     bool isLocked = recvSendLock.try_lock();
 
     if(!isLocked){
-        cout << "sender is busy" << endl;
+        logger.printWarning("sender is busy");
         return false;
     }
 
+    isImageJsonSend.store(false);
     imageSender->sendMessage();
+    isImageJsonSend.store(true);
+
     recvSendLock.unlock();
+    logger.printLog("image sended");
 
     return true;
 }
@@ -408,18 +429,21 @@ static bool save_image(const std::string &path,
 void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     bboxProcess(*labelSender, frame_meta);
     addMeta(*labelSender, ip_surf, frame_meta);
+    isSimpleJsonSend.store(false);
     labelSender->sendMessage();
+    isSimpleJsonSend.store(true);
 }
 
 void limitFps(){
     
     static auto last = std::chrono::high_resolution_clock::now();
+    static auto delay = std::chrono::milliseconds(1000 / appCtx[0]->config.fps.max_fps);
     auto now = std::chrono::high_resolution_clock::now();
     
     std::chrono::duration<double, std::milli> processTime = now - last;
 
-    if(processTime < DELAY_FOR_LIMIT){
-        std::this_thread::sleep_for(DELAY_FOR_LIMIT - processTime);
+    if(processTime < delay){
+        std::this_thread::sleep_for(delay - processTime);
     }
     last = std::chrono::high_resolution_clock::now();
 }
@@ -588,7 +612,7 @@ perf_cb(gpointer context, NvDsAppPerfStruct *str) {
         }
     }
 
-    num_fps_inst++;
+num_fps_inst++;
     if (num_fps_inst < num_instances) {
         g_mutex_unlock(&fps_lock);
         return;
@@ -606,7 +630,7 @@ perf_cb(gpointer context, NvDsAppPerfStruct *str) {
     }
     header_print_cnt++;
     g_print("**PERF: ");
-    for (i = 0; i < numf; i++) {
+    for (i = 0; i < numf; i++) { 
         g_print("%.2f (%.2f)\t", fps[i], fps_avg[i]);
     }
     g_print("\n");
@@ -717,77 +741,77 @@ event_thread_func(gpointer arg) {
         g_main_loop_quit(main_loop);
         return FALSE;
     }
-    // Check for keyboard input
-    if (!kbhit()) {
-        //continue;
-        return TRUE;
-    }
-    int c = fgetc(stdin);
-    g_print("\n");
+    // // Check for keyboard input
+    // if (!kbhit()) {
+    //     //continue;
+    //     return TRUE;
+    // }
+    // int c = fgetc(stdin);
+    // g_print("\n");
 
-    gint source_id;
-    GstElement *tiler = appCtx[0]->pipeline.tiled_display_bin.tiler;
-    g_object_get(G_OBJECT(tiler), "show-source", &source_id, nullptr);
+    // gint source_id;
+    // GstElement *tiler = appCtx[0]->pipeline.tiled_display_bin.tiler;
+    // g_object_get(G_OBJECT(tiler), "show-source", &source_id, nullptr);
 
-    if (selecting) {
-        if (rrowsel == FALSE) {
-            if (c >= '0' && c <= '9') {
-                rrow = c - '0';
-                if (rrow < appCtx[0]->config.tiled_display_config.rows) {
-                    g_print("--selecting source  row %d--\n", rrow);
-                    rrowsel = TRUE;
-                } else {
-                    g_print("--selected source  row %d out of bound, reenter\n", rrow);
-                }
-            }
-        } else {
-            if (c >= '0' && c <= '9') {
-                unsigned int tile_num_columns = appCtx[0]->config.tiled_display_config.columns;
-                rcol = c - '0';
-                if (rcol < tile_num_columns) {
-                    selecting = FALSE;
-                    rrowsel = FALSE;
-                    source_id = tile_num_columns * rrow + rcol;
-                    g_print("--selecting source  col %d sou=%d--\n", rcol, source_id);
-                    if (source_id >= (gint) appCtx[0]->config.num_source_sub_bins) {
-                        source_id = -1;
-                    } else {
-                        source_ids[0] = source_id;
-                        appCtx[0]->show_bbox_text = TRUE;
-                        g_object_set(G_OBJECT(tiler), "show-source", source_id, nullptr);
-                    }
-                } else {
-                    g_print("--selected source  col %d out of bound, reenter\n", rcol);
-                }
-            }
-        }
-    }
-    switch (c) {
-        case 'h':
-            print_runtime_commands();
-            break;
-        case 'p':
-            for (i = 0; i < num_instances; i++)
-                pause_pipeline(appCtx[i]);
-            break;
-        case 'r':
-            for (i = 0; i < num_instances; i++)
-                resume_pipeline(appCtx[i]);
-            break;
-        case 'q':
-            quit = TRUE;
-            g_main_loop_quit(main_loop);
-            ret = FALSE;
-            break;
-        case 'z':
-            if (source_id == -1 && selecting == FALSE) {
-                g_print("--selecting source --\n");
-                selecting = TRUE;
-            }
-            break;
-        default:
-            break;
-    }
+    // if (selecting) {
+    //     if (rrowsel == FALSE) {
+    //         if (c >= '0' && c <= '9') {
+    //             rrow = c - '0';
+    //             if (rrow < appCtx[0]->config.tiled_display_config.rows) {
+    //                 g_print("--selecting source  row %d--\n", rrow);
+    //                 rrowsel = TRUE;
+    //             } else {
+    //                 g_print("--selected source  row %d out of bound, reenter\n", rrow);
+    //             }
+    //         }
+    //     } else {
+    //         if (c >= '0' && c <= '9') {
+    //             unsigned int tile_num_columns = appCtx[0]->config.tiled_display_config.columns;
+    //             rcol = c - '0';
+    //             if (rcol < tile_num_columns) {
+    //                 selecting = FALSE;
+    //                 rrowsel = FALSE;
+    //                 source_id = tile_num_columns * rrow + rcol;
+    //                 g_print("--selecting source  col %d sou=%d--\n", rcol, source_id);
+    //                 if (source_id >= (gint) appCtx[0]->config.num_source_sub_bins) {
+    //                     source_id = -1;
+    //                 } else {
+    //                     source_ids[0] = source_id;
+    //                     appCtx[0]->show_bbox_text = TRUE;
+    //                     g_object_set(G_OBJECT(tiler), "show-source", source_id, nullptr);
+    //                 }
+    //             } else {
+    //                 g_print("--selected source  col %d out of bound, reenter\n", rcol);
+    //             }
+    //         }
+    //     }
+    // }
+    // switch (c) {
+    //     case 'h':
+    //         print_runtime_commands();
+    //         break;
+    //     case 'p':
+    //         for (i = 0; i < num_instances; i++)
+    //             pause_pipeline(appCtx[i]);
+    //         break;
+    //     case 'r':
+    //         for (i = 0; i < num_instances; i++)
+    //             resume_pipeline(appCtx[i]);
+    //         break;
+    //     case 'q':
+    //         quit = TRUE;
+    //         g_main_loop_quit(main_loop);
+    //         ret = FALSE;
+    //         break;
+    //     case 'z':
+    //         if (source_id == -1 && selecting == FALSE) {
+    //             g_print("--selecting source --\n");
+    //             selecting = TRUE;
+    //         }
+    //         break;
+    //     default:
+    //         break;
+    // }
     return ret;
 }
 
@@ -1031,7 +1055,7 @@ int main(int argc, char *argv[]) {
 
         for (i = 0; i < num_instances; i++) {
             if (!create_pipeline(appCtx[i], after_pgie_image_meta_save,
-                                 nullptr, perf_cb, overlay_graphics)) {
+                                 nullptr, fpsLogger, overlay_graphics)) {
                 NVGSTDS_ERR_MSG_V("Failed to create pipeline");
                 return_value = -1;
                 should_goto_done = true;
@@ -1208,7 +1232,7 @@ int main(int argc, char *argv[]) {
         print_runtime_commands();
         changemode(1);
 
-        // g_timeout_add(40, event_thread_func, nullptr);
+        g_timeout_add(40, event_thread_func, nullptr);
 
         onStart();
         g_main_loop_run(main_loop);
