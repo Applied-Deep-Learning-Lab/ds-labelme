@@ -34,6 +34,7 @@ public:
 
     void addMeta(std::string key);
     void addMeta(std::string key, std::string value);
+    void addObjectMeta(std::string key, std::string value);
     void addMeta(std::string key, int64_t value);
     void addMeta(std::string key, uint64_t value);
     void addMetaTime(std::string key, uint64_t value);

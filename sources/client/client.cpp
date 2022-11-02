@@ -230,6 +230,10 @@ void Client::addMeta(string key){
     metaJsons.push_back("\"" + key + "\" : {}");
 }
 
+void Client::addObjectMeta(string key, string value){
+    metaJsons.push_back("\"" + key + "\" : " + value);
+}
+
 void Client::sendMessage(){
 
     string toSend = "{";
