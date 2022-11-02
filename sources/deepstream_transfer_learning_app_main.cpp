@@ -62,7 +62,8 @@ using namespace std;
 
 // Settings
 const string imageName = "tmp.jpg";
-const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
+// const string pathToImage = "/dev/shm/ds-labelme/image-buffer/";
+const string pathToImage = "data/image/";
 const string imageFullName = pathToImage + imageName;
 
 static int FPS_LIMIT = 1;
@@ -76,8 +77,8 @@ static constexpr unsigned DEFAULT_X_WINDOW_HEIGHT = 480;
 static constexpr unsigned SEND_IMAGE_WIDTH = 640;
 static constexpr unsigned SEND_IMAGE_HEIGHT = 480;
 
-static int COLOR_IMAGE_SIZE = 128;
-static int GIST_WIDTH = 18;
+static int COLOR_IMAGE_SIZE = 32;
+static int GIST_WIDTH = 32;
 
 constexpr unsigned MAX_INSTANCES = 128;
 
@@ -126,6 +127,16 @@ static GMutex disp_lock;
 // Object that will contain the necessary information for metadata file creation.
 // It consumes the metadata created by producers and write them into files.
 static ImageMetaConsumer g_img_meta_consumer;
+
+
+#define nowt (std::chrono::high_resolution_clock::now())
+#define begin_time() begint = nowt;
+#define durationt (std::chrono::duration_cast<std::chrono::microseconds>(nowt - begint).count());
+#define check_time(msg) logger.printLog((string)msg + ": " + to_string(std::chrono::duration_cast<std::chrono::microseconds>(nowt - begint).count())); begin_time();
+
+std::chrono::high_resolution_clock::time_point begint;
+std::chrono::high_resolution_clock::time_point endt;
+
 
 GST_DEBUG_CATEGORY(NVDS_APP);
 
@@ -228,7 +239,15 @@ cv::Scalar meanHsv;
 cv::Mat hist;
 
 static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface *to_surf, NvBbox_Coords box, NvDsFrameMeta *frame_meta, int offset);
+string getColorStats();
+
+cv::Scalar getBboxMeanColor(const cv::Mat& image, cv::Rect rect){
+    cv::Mat bboxImage = image(rect);
+    return cv::mean(bboxImage);
+}
+
 void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_meta){
+    
     BBbox bbox;
 
     if(frame_meta->num_obj_meta <= 0){
@@ -241,6 +260,8 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
     int dstWidth = COLOR_IMAGE_SIZE * frame_meta->num_obj_meta;
     int dstHeight = COLOR_IMAGE_SIZE;
     
+    // int dstWidth = 640;
+    // int dstHeight = 640;
 
     NvBufSurface* ip_surf_sys;
     NvBufSurface* ip_surf_rgb;
@@ -262,7 +283,6 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
 
 
 
-
     int i = 0;
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
         
@@ -276,59 +296,92 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
         bbox.height = obj->detector_bbox_info.org_bbox_coords.height;
         bbox.id     = obj->object_id;
         bbox.label  = obj->text_params.display_text;
+
+        
         client.addBBox(bbox);
         
-        
         auto box = obj->detector_bbox_info.org_bbox_coords;
-
         get_bubble_image(name, ip_surf, ip_surf_rgb, box, frame_meta, i++);
-
-
-        int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
-    
-       
-
-
+        
+        
 
     }
+    int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
     cv::Mat mat = cv::Mat(dstHeight, dstWidth, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
-    
+
 
     cv::cvtColor(mat, mat, cv::COLOR_BGR2HSV);
+
+    begin_time();
+    
+    // i = 0;
+    // cv::Scalar* means = new cv::Scalar[frame_meta->num_obj_meta];
+    // cv::Mat* bbox_images = new cv::Mat[frame_meta->num_obj_meta];
+    // for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
+        
+    //     NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
+    //     cv::Rect2d rect = cv::Rect2d(
+    //         obj->detector_bbox_info.org_bbox_coords.left,
+    //         obj->detector_bbox_info.org_bbox_coords.top,
+    //         obj->detector_bbox_info.org_bbox_coords.width,
+    //         obj->detector_bbox_info.org_bbox_coords.height
+    //     );
+    //     means[i] = getBboxMeanColor(mat, rect);
+    //     bbox_images[i] = mat(rect);
+    //     i++;
+    // }
+    // check_time("test");
+    const int s = frame_meta->num_obj_meta;
+
     meanHsv = cv::mean(mat);
-    int channels[] = {0};
+    // cv::Scalar meanHsv2 = cv::mean(cv::Mat(s, 1, CV_8UC4, means));
+
+    //printf("(%f, %f, %f), (%f, %f, %f)\n", meanHsv[0], meanHsv[1], meanHsv[2],  meanHsv2[0], meanHsv2[1], meanHsv2[2]);
+
+    int channels[] = {0, 4};
     int histSize[] = {GIST_WIDTH};
     float range[2] = { 0, 255 };
     const float *ranges[1] = {range};
     
+    // cv::calcHist( bbox_images, s, (int*) channels, cv::Mat(), // do not use mask
+    //              hist, 1, (int*)&histSize, ranges);
+
+    
+    //logger.printLog(getColorStats());
+
     cv::calcHist( (cv::Mat*)&mat, 1, (int*) channels, cv::Mat(), // do not use mask
                  hist, 1, (int*)&histSize, ranges);
-
+    cout << hist << endl;
     // cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
 
     string line = "Hist: " + to_string(hist.at<float>(0));
     for(int i = 1; i < histSize[0]; i++){
         line += ", " + to_string(hist.at<float>(i));
     }
-    logger.printLog(line + ";");
+
+    // logger.printLog(line + ";");
 
     string name = pathToImage + "frame" + to_string(frame_meta->frame_num) + ".png";
-    logger.printLog("Save: " + name);
+    //logger.printLog("Save: " + name);
     //logger.printLog("Mean: " + to_string(mean[0]) + ", " + to_string(mean[1]) + ", " + to_string(mean[2]));
     
-    cv::imwrite(name, mat);
+    // cv::imwrite(name, mat);
+    NvBufSurfaceDestroy(ip_surf_rgb);
+    NvBufSurfaceDestroy(ip_surf_sys);
+    // delete[] bbox_images;
+    // delete[] means;
     
 }
 
 string getColorStats(){
     string json = "{\"means\": {";
-    json += "\"h\":" + to_string(meanHsv[0]) + ", \"s\": " + to_string(meanHsv[0]) + ", \"v\": " + to_string(meanHsv[0]);
+    json += "\"h\":" + to_string(meanHsv[0]) + ", \"s\": " + to_string(meanHsv[1]) + ", \"v\": " + to_string(meanHsv[2]);
     json += "}, \"histograms\": {\"h\": [";
 
     json += to_string(hist.at<float>(0));
     for (int i = 1; i < GIST_WIDTH; i++)
     {
-        json += ", " + to_string(hist.at<float>(0));
+        json += ", " + to_string(hist.at<float>(i));
     }
     json +="]}}";
 
@@ -349,11 +402,11 @@ void addMeta(Client& client, NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     
 
     if(frame_meta->num_obj_meta > 0){
-        client.addMeta("colorStats", getColorStats());
-        cout << getColorStats() << endl;
+        client.addObjectMeta("colorStats", getColorStats());
+        // cout << getColorStats() << endl;
     } else {
         client.addMeta("colorStats");
-        cout << "\"colorStats\": {}" << endl;
+        // cout << "\"colorStats\": {}" << endl;
     }
 
     
@@ -393,10 +446,14 @@ fpsLogger(gpointer context, NvDsAppPerfStruct *str) {
     }
     g_mutex_unlock(&fps_lock);
 
+
 }
+
+
 
 static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface* to_surf, NvBbox_Coords box, NvDsFrameMeta *frame_meta, int offset) {
     // logger.printLog("Save: " + name);
+
 
     
         NvBufSurfTransformRect src_rect;
@@ -416,14 +473,14 @@ static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface* t
         transform.dst_rect = &dst_rect;
         transform.transform_filter = NvBufSurfTransformInter_Algo1;
         transform.transform_flip = NvBufSurfTransform_None;
-        transform.transform_flag = NVBUFSURF_TRANSFORM_FILTER | NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;
+        transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST | NVBUFSURF_TRANSFORM_FILTER;
+        
 
     auto tranformResult = NvBufSurfTransform(ip_surf, to_surf, &transform);
         if(tranformResult != NvBufSurfTransformError_Success) {
             logger.printError("transform failed");
             return false;
     }
-
     
 
 }
@@ -436,7 +493,7 @@ static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface* t
 /// @param [in] ctx Object containing the saving process which is launched asynchronously.
 /// @param [in] ip_surf Object containing the image to save.
 /// @param [in] obj_meta Object containing information about the area to crop
-/// in the full image.
+/// in the full image.image
 /// @param [in] frame_meta Object containing information about the current frame.
 /// @param [in, out] obj_counter Unsigned integer counting the number of objects saved.
 /// @return true if the image was saved false otherwise.
@@ -511,8 +568,8 @@ static bool save_image(const std::string &path,
 
     int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
     
-    cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC1, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
-    cv::imwrite(pathToImage +  "cv_test.jpg", mat);
+    // cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC1, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
+    // cv::imwrite(pathToImage +  "cv_test.jpg", mat);
 
     
 
@@ -538,11 +595,15 @@ static bool save_image(const std::string &path,
     cv::Mat imaget = cv::Mat(height, width, CV_8UC3);
 
     
+
+    
     cv::cvtColor(imagef, imaget, cv::COLOR_BGRA2BGR);
 
     auto cdata = base64_encode(imaget.data, width * height * 3);
 
-    
+    NvBufSurfaceDestroy(ip_surf_rgb);
+    NvBufSurfaceDestroy(ip_surf_sys);
+
     // cv::imwrite("/dev/shm/test.jpg", imaget);
 
     imageSender->addMeta("imagePitch", (u_int64_t)ip_surf_sys->surfaceList[0].pitch);
@@ -573,7 +634,9 @@ void sendSimpleJson(NvBufSurface *ip_surf, NvDsFrameMeta *frame_meta){
     //     get_bubble_image(ip_surf, box, frame_meta);
     // }
     
+    
     bboxProcess(ip_surf, *labelSender, frame_meta);
+    
     addMeta(*labelSender, ip_surf, frame_meta);
     isSimpleJsonSend.store(false);
     labelSender->sendMessage();
