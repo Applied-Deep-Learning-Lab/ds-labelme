@@ -257,11 +257,11 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
     int srcWidth = ip_surf->surfaceList[0].width;
     int srcHeight = ip_surf->surfaceList[0].height;
 
-    int dstWidth = COLOR_IMAGE_SIZE * frame_meta->num_obj_meta;
-    int dstHeight = COLOR_IMAGE_SIZE;
+    // int dstWidth = COLOR_IMAGE_SIZE * frame_meta->num_obj_meta;
+    // int dstHeight = COLOR_IMAGE_SIZE;
     
-    // int dstWidth = 640;
-    // int dstHeight = 640;
+    int dstWidth = 640;
+    int dstHeight = 640;
 
     NvBufSurface* ip_surf_sys;
     NvBufSurface* ip_surf_rgb;
@@ -314,22 +314,22 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
 
     begin_time();
     
-    // i = 0;
-    // cv::Scalar* means = new cv::Scalar[frame_meta->num_obj_meta];
-    // cv::Mat* bbox_images = new cv::Mat[frame_meta->num_obj_meta];
-    // for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
+    i = 0;
+    cv::Scalar* means = new cv::Scalar[frame_meta->num_obj_meta];
+    cv::Mat* bbox_images = new cv::Mat[frame_meta->num_obj_meta];
+    for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
         
-    //     NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
-    //     cv::Rect2d rect = cv::Rect2d(
-    //         obj->detector_bbox_info.org_bbox_coords.left,
-    //         obj->detector_bbox_info.org_bbox_coords.top,
-    //         obj->detector_bbox_info.org_bbox_coords.width,
-    //         obj->detector_bbox_info.org_bbox_coords.height
-    //     );
-    //     means[i] = getBboxMeanColor(mat, rect);
-    //     bbox_images[i] = mat(rect);
-    //     i++;
-    // }
+        NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
+        cv::Rect2d rect = cv::Rect2d(
+            obj->detector_bbox_info.org_bbox_coords.left,
+            obj->detector_bbox_info.org_bbox_coords.top,
+            obj->detector_bbox_info.org_bbox_coords.width,
+            obj->detector_bbox_info.org_bbox_coords.height
+        );
+        means[i] = getBboxMeanColor(mat, rect);
+        bbox_images[i] = mat(rect);
+        i++;
+    }
     // check_time("test");
     const int s = frame_meta->num_obj_meta;
 
@@ -343,15 +343,15 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
     float range[2] = { 0, 255 };
     const float *ranges[1] = {range};
     
-    // cv::calcHist( bbox_images, s, (int*) channels, cv::Mat(), // do not use mask
-    //              hist, 1, (int*)&histSize, ranges);
+    cv::calcHist( bbox_images, s, (int*) channels, cv::Mat(), // do not use mask
+                 hist, 1, (int*)&histSize, ranges);
 
-    
+    cout << hist << endl;
     //logger.printLog(getColorStats());
 
     cv::calcHist( (cv::Mat*)&mat, 1, (int*) channels, cv::Mat(), // do not use mask
                  hist, 1, (int*)&histSize, ranges);
-    cout << hist << endl;
+    
     // cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
 
     string line = "Hist: " + to_string(hist.at<float>(0));
@@ -470,7 +470,7 @@ static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface* t
 
         NvBufSurfTransformParams transform;
         transform.src_rect = &src_rect;
-        transform.dst_rect = &dst_rect;
+        transform.dst_rect = &src_rect;
         transform.transform_filter = NvBufSurfTransformInter_Algo1;
         transform.transform_flip = NvBufSurfTransform_None;
         transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST | NVBUFSURF_TRANSFORM_FILTER;
