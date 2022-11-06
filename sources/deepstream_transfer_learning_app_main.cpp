@@ -301,22 +301,49 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
         client.addBBox(bbox);
         
         auto box = obj->detector_bbox_info.org_bbox_coords;
-        get_bubble_image(name, ip_surf, ip_surf_rgb, box, frame_meta, i++);
+        // get_bubble_image(name, ip_surf, ip_surf_rgb, box, frame_meta, i++);
         
         
 
     }
+
+
+    NvBufSurfTransformRect src_rect;
+    src_rect.top = 0;
+    src_rect.left = 0;
+    src_rect.height = ip_surf->surfaceList[0].width;
+    src_rect.width = ip_surf->surfaceList[0].height;
+
+    NvBufSurfTransformParams transform;
+    transform.dst_rect = &src_rect;
+    transform.src_rect = &src_rect;
+    transform.transform_filter = NvBufSurfTransformInter_Nearest;
+    transform.transform_flip = NvBufSurfTransform_None;
+    transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;   
+
+    auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
+        if(tranformResult != NvBufSurfTransformError_Success) {
+            logger.printError("transform failed");
+    } 
+
     int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
     cv::Mat mat = cv::Mat(dstHeight, dstWidth, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
 
 
     cv::cvtColor(mat, mat, cv::COLOR_BGR2HSV);
 
-    begin_time();
     
+    begin_time();
+    int channels[] = {0, 4};
+    int histSize[] = {GIST_WIDTH};
+    float range[2] = { 0, 255 };
+    const float *ranges[2] = {range, range};
+    const int s = frame_meta->num_obj_meta;
+    cv::Scalar meanSum(0, 0, 0, 0);
     i = 0;
     cv::Scalar* means = new cv::Scalar[frame_meta->num_obj_meta];
-    cv::Mat* bbox_images = new cv::Mat[frame_meta->num_obj_meta];
+    hist = cv::Mat::zeros(GIST_WIDTH, 1, CV_32F);
+    
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
         
         NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
@@ -326,38 +353,31 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
             obj->detector_bbox_info.org_bbox_coords.width,
             obj->detector_bbox_info.org_bbox_coords.height
         );
-        means[i] = getBboxMeanColor(mat, rect);
-        bbox_images[i] = mat(rect);
+        auto meanTest = getBboxMeanColor(mat, rect);
+        cv::Mat bbox_image = mat(rect);
+        meanSum += cv::mean(bbox_image);
+        cv::Mat bboxhist;
+        cv::calcHist( &bbox_image, 1, (int*) channels, cv::Mat(), // do not use mask
+                 bboxhist, 1, (int*)&histSize, ranges);
+        
+        hist += bboxhist;
+
         i++;
     }
     // check_time("test");
-    const int s = frame_meta->num_obj_meta;
-
-    meanHsv = cv::mean(mat);
-    // cv::Scalar meanHsv2 = cv::mean(cv::Mat(s, 1, CV_8UC4, means));
-
+    check_time("test");
+    // meanHsv = cv::mean(mat);
+    meanHsv =  meanSum / s;
     //printf("(%f, %f, %f), (%f, %f, %f)\n", meanHsv[0], meanHsv[1], meanHsv[2],  meanHsv2[0], meanHsv2[1], meanHsv2[2]);
 
-    int channels[] = {0, 4};
-    int histSize[] = {GIST_WIDTH};
-    float range[2] = { 0, 255 };
-    const float *ranges[1] = {range};
-    
-    cv::calcHist( bbox_images, s, (int*) channels, cv::Mat(), // do not use mask
-                 hist, 1, (int*)&histSize, ranges);
 
-    cout << hist << endl;
-    //logger.printLog(getColorStats());
+    // cout << hist << endl;
+    logger.printLog(getColorStats());
 
-    cv::calcHist( (cv::Mat*)&mat, 1, (int*) channels, cv::Mat(), // do not use mask
-                 hist, 1, (int*)&histSize, ranges);
+    // cv::calcHist( (cv::Mat*)&mat, 1, (int*) channels, cv::Mat(), // do not use mask
+    //              hist, 1, (int*)&histSize, ranges);
     
     // cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
-
-    string line = "Hist: " + to_string(hist.at<float>(0));
-    for(int i = 1; i < histSize[0]; i++){
-        line += ", " + to_string(hist.at<float>(i));
-    }
 
     // logger.printLog(line + ";");
 
