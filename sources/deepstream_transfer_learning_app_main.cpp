@@ -55,6 +55,7 @@
 
 // Additional modules
 #include "client/client.h"
+#include "tools/buf_surface_tools.h"
 #include "base64/base64.h"
 #include "logger.h"
 
@@ -80,7 +81,8 @@ static constexpr unsigned SEND_IMAGE_HEIGHT = 480;
 static int COLOR_IMAGE_SIZE = 32;
 static int GIST_WIDTH = 32;
 
-constexpr unsigned MAX_INSTANCES = 128;
+constexpr unsigned MAX_INSTANCES = 12;
+static constexpr int GPU_ID = 0;
 
 #define APP_TITLE "DeepStream Transfer Learning App"
 
@@ -153,6 +155,7 @@ GOptionEntry entries[] = {
                 "Set the input file", nullptr},
         {nullptr},
 };
+
 
 
 void parseXML(string input){
@@ -257,93 +260,24 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
     int srcWidth = ip_surf->surfaceList[0].width;
     int srcHeight = ip_surf->surfaceList[0].height;
 
-    // int dstWidth = COLOR_IMAGE_SIZE * frame_meta->num_obj_meta;
-    // int dstHeight = COLOR_IMAGE_SIZE;
-    
-    int dstWidth = 640;
-    int dstHeight = 640;
+    NvBufSurface* ip_surf_rgb = getNewColorTypeSurface(ip_surf, NVBUF_COLOR_FORMAT_BGRA);
+    NvBufSurface* ip_surf_sys = getSystemMemorySurface(ip_surf_rgb);
 
-    NvBufSurface* ip_surf_sys;
-    NvBufSurface* ip_surf_rgb;
-    NvBufSurfTransformConfigParams transform_config_params;
-    NvBufSurfaceCreateParams nvbufsurface_create_params;
-    
-    nvbufsurface_create_params.gpuId  = ip_surf->gpuId;
-    nvbufsurface_create_params.width  = (guint) dstWidth;
-    nvbufsurface_create_params.height = (guint) dstHeight;
-    nvbufsurface_create_params.size = 0;
-    nvbufsurface_create_params.isContiguous = true;
-    nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGRA;
-    nvbufsurface_create_params.layout = NVBUF_LAYOUT_PITCH;
-    nvbufsurface_create_params.memType = NVBUF_MEM_SYSTEM;
-
-    gint create_result = NvBufSurfaceCreate(&ip_surf_sys, ip_surf->batchSize, &nvbufsurface_create_params);
-    nvbufsurface_create_params.memType = NVBUF_MEM_DEFAULT;
-    create_result = NvBufSurfaceCreate(&ip_surf_rgb, ip_surf->batchSize, &nvbufsurface_create_params);
-
-
-
-    int i = 0;
-    for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
-        
-        NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
-        string name = pathToImage + to_string(frame_meta->frame_num) + "_" + to_string(obj->object_id) +  "bubble.jpg";
-        
-        
-        bbox.left   = obj->detector_bbox_info.org_bbox_coords.left;
-        bbox.top    = obj->detector_bbox_info.org_bbox_coords.top;
-        bbox.width  = obj->detector_bbox_info.org_bbox_coords.width;
-        bbox.height = obj->detector_bbox_info.org_bbox_coords.height;
-        bbox.id     = obj->object_id;
-        bbox.label  = obj->text_params.display_text;
-
-        
-        client.addBBox(bbox);
-        
-        auto box = obj->detector_bbox_info.org_bbox_coords;
-        // get_bubble_image(name, ip_surf, ip_surf_rgb, box, frame_meta, i++);
-        
-        
-
-    }
-
-
-    NvBufSurfTransformRect src_rect;
-    src_rect.top = 0;
-    src_rect.left = 0;
-    src_rect.height = ip_surf->surfaceList[0].width;
-    src_rect.width = ip_surf->surfaceList[0].height;
-
-    NvBufSurfTransformParams transform;
-    transform.dst_rect = &src_rect;
-    transform.src_rect = &src_rect;
-    transform.transform_filter = NvBufSurfTransformInter_Nearest;
-    transform.transform_flip = NvBufSurfTransform_None;
-    transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;   
-
-    auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
-        if(tranformResult != NvBufSurfTransformError_Success) {
-            logger.printError("transform failed");
-    } 
-
-    int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
-    cv::Mat mat = cv::Mat(dstHeight, dstWidth, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
-
-
-    cv::cvtColor(mat, mat, cv::COLOR_BGR2HSV);
-
+    cv::Mat mat = cv::Mat(srcHeight, srcWidth, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
     
     begin_time();
+    
+    cv::Scalar meanSum(0, 0, 0, 0);
+
+    // Histogram parametrs
     int channels[] = {0, 4};
     int histSize[] = {GIST_WIDTH};
     float range[2] = { 0, 255 };
     const float *ranges[2] = {range, range};
-    const int s = frame_meta->num_obj_meta;
-    cv::Scalar meanSum(0, 0, 0, 0);
-    i = 0;
-    cv::Scalar* means = new cv::Scalar[frame_meta->num_obj_meta];
+    const int obj_count = frame_meta->num_obj_meta;
     hist = cv::Mat::zeros(GIST_WIDTH, 1, CV_32F);
-    
+    // ---
+
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL; l_obj = l_obj->next) {
         
         NvDsObjectMeta *obj = (NvDsObjectMeta *) l_obj->data;
@@ -353,43 +287,37 @@ void bboxProcess(NvBufSurface *ip_surf, Client& client, NvDsFrameMeta *frame_met
             obj->detector_bbox_info.org_bbox_coords.width,
             obj->detector_bbox_info.org_bbox_coords.height
         );
-        auto meanTest = getBboxMeanColor(mat, rect);
+
+        bbox.left   = rect.x;
+        bbox.top    = rect.y;
+        bbox.width  = rect.width;
+        bbox.height = rect.height;
+        bbox.id     = obj->object_id;
+        bbox.label  = obj->text_params.display_text;
+
+        client.addBBox(bbox);
+
         cv::Mat bbox_image = mat(rect);
+        cv::cvtColor(bbox_image, bbox_image, cv::COLOR_BGR2HSV);
         meanSum += cv::mean(bbox_image);
         cv::Mat bboxhist;
-        cv::calcHist( &bbox_image, 1, (int*) channels, cv::Mat(), // do not use mask
-                 bboxhist, 1, (int*)&histSize, ranges);
+        cv::calcHist( &bbox_image, 1, (int*) channels, cv::Mat(), bboxhist, 1, (int*)&histSize, ranges);
         
         hist += bboxhist;
-
-        i++;
     }
     // check_time("test");
-    check_time("test");
-    // meanHsv = cv::mean(mat);
-    meanHsv =  meanSum / s;
-    //printf("(%f, %f, %f), (%f, %f, %f)\n", meanHsv[0], meanHsv[1], meanHsv[2],  meanHsv2[0], meanHsv2[1], meanHsv2[2]);
+    meanHsv =  meanSum / obj_count;
+    
+    // logger.printLog(getColorStats());
 
-
-    // cout << hist << endl;
-    logger.printLog(getColorStats());
-
-    // cv::calcHist( (cv::Mat*)&mat, 1, (int*) channels, cv::Mat(), // do not use mask
-    //              hist, 1, (int*)&histSize, ranges);
     
     // cv::normalize(hist, hist, 0, 1, cv::NORM_MINMAX, -1, cv::Mat() );
 
-    // logger.printLog(line + ";");
-
-    string name = pathToImage + "frame" + to_string(frame_meta->frame_num) + ".png";
-    //logger.printLog("Save: " + name);
-    //logger.printLog("Mean: " + to_string(mean[0]) + ", " + to_string(mean[1]) + ", " + to_string(mean[2]));
-    
+    // string name = pathToImage + "frame" + to_string(frame_meta->frame_num) + ".png";
     // cv::imwrite(name, mat);
+
     NvBufSurfaceDestroy(ip_surf_rgb);
     NvBufSurfaceDestroy(ip_surf_sys);
-    // delete[] bbox_images;
-    // delete[] means;
     
 }
 
@@ -470,41 +398,6 @@ fpsLogger(gpointer context, NvDsAppPerfStruct *str) {
 }
 
 
-
-static bool get_bubble_image(string name, NvBufSurface *ip_surf, NvBufSurface* to_surf, NvBbox_Coords box, NvDsFrameMeta *frame_meta, int offset) {
-    // logger.printLog("Save: " + name);
-
-
-    
-        NvBufSurfTransformRect src_rect;
-        src_rect.top = box.top;
-        src_rect.left = box.left;
-        src_rect.height = box.height;
-        src_rect.width = box.width;
-
-        NvBufSurfTransformRect dst_rect;
-        dst_rect.top = 0;
-        dst_rect.left =  COLOR_IMAGE_SIZE * offset;
-        dst_rect.height = COLOR_IMAGE_SIZE;
-        dst_rect.width = COLOR_IMAGE_SIZE;
-
-        NvBufSurfTransformParams transform;
-        transform.src_rect = &src_rect;
-        transform.dst_rect = &src_rect;
-        transform.transform_filter = NvBufSurfTransformInter_Algo1;
-        transform.transform_flip = NvBufSurfTransform_None;
-        transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST | NVBUFSURF_TRANSFORM_FILTER;
-        
-
-    auto tranformResult = NvBufSurfTransform(ip_surf, to_surf, &transform);
-        if(tranformResult != NvBufSurfTransformError_Success) {
-            logger.printError("transform failed");
-            return false;
-    }
-    
-
-}
-
 /// Will save an image cropped with the dimension specified by obj_meta
 /// If the path is too long, the save will not occur and an error message will be
 /// diplayed.
@@ -531,65 +424,12 @@ static bool save_image(const std::string &path,
 
     int srcWidth = ip_surf->surfaceList[0].width;
     int srcHeight = ip_surf->surfaceList[0].height;
-
-    NvBufSurfTransformRect src_rect;
-    src_rect.top = 0;
-    src_rect.left = 0;
-    src_rect.height = srcHeight;
-    src_rect.width = srcWidth;
-
-    NvBufSurfTransformRect dst_rect;
-    dst_rect.top = 0;
-    dst_rect.left = 0;
-    dst_rect.height = SEND_IMAGE_HEIGHT;
-    dst_rect.width = SEND_IMAGE_WIDTH;
     
-    // Save ratio
-    if(src_rect.width > src_rect.height){;
-        float scale = dst_rect.width / (float)src_rect.width;
-        dst_rect.height = src_rect.height * scale;
-        dst_rect.top = (SEND_IMAGE_HEIGHT - dst_rect.height) / 2;
-    }else{
-        float scale = dst_rect.height / (float)src_rect.height;
-        dst_rect.width = src_rect.width * scale;
-        dst_rect.height = (SEND_IMAGE_WIDTH - dst_rect.width) / 2;
-    }
-
-    NvBufSurfTransformParams transform;
-    transform.dst_rect = &src_rect;
-    transform.src_rect = &src_rect;
-    transform.transform_filter = NvBufSurfTransformInter_Nearest;
-    transform.transform_flip = NvBufSurfTransform_None;
-    transform.transform_flag = NVBUFSURF_TRANSFORM_CROP_SRC | NVBUFSURF_TRANSFORM_CROP_DST;    
-
-    NvBufSurface* ip_surf_sys;
-    NvBufSurface* ip_surf_rgb;
-    NvBufSurfTransformConfigParams transform_config_params;
-    NvBufSurfaceCreateParams nvbufsurface_create_params;
-	
-	nvbufsurface_create_params.gpuId  = ip_surf->gpuId;
-	nvbufsurface_create_params.width  = (guint) srcWidth;
-	nvbufsurface_create_params.height = (guint) srcHeight;
-	nvbufsurface_create_params.size = 0;
-	nvbufsurface_create_params.isContiguous = true;
-	nvbufsurface_create_params.colorFormat = NVBUF_COLOR_FORMAT_BGRA;
-	nvbufsurface_create_params.layout = NVBUF_LAYOUT_PITCH;
-    nvbufsurface_create_params.memType = NVBUF_MEM_SYSTEM;
-
-    gint create_result = NvBufSurfaceCreate(&ip_surf_sys, ip_surf->batchSize, &nvbufsurface_create_params);
-    nvbufsurface_create_params.memType = NVBUF_MEM_DEFAULT;
-    create_result = NvBufSurfaceCreate(&ip_surf_rgb, ip_surf->batchSize, &nvbufsurface_create_params);
+    NvBufSurface* ip_surf_rgb = getNewColorTypeSurface(ip_surf, NVBUF_COLOR_FORMAT_BGRA);
+    NvBufSurface* ip_surf_sys = getSystemMemorySurface(ip_surf_rgb);
     
-    auto tranformResult = NvBufSurfTransform(ip_surf, ip_surf_rgb, &transform);
-        if(tranformResult != NvBufSurfTransformError_Success) {
-            logger.printError("transform failed");
-            return false;
-    }
-
-    int result = NvBufSurfaceCopy(ip_surf_rgb, ip_surf_sys);
-    
-    // cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC1, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
-    // cv::imwrite(pathToImage +  "cv_test.jpg", mat);
+    cv::Mat mat = cv::Mat(SEND_IMAGE_HEIGHT, SEND_IMAGE_WIDTH, CV_8UC4, (char*)ip_surf_sys->surfaceList[0].dataPtr, ip_surf_sys->surfaceList[0].pitch);
+    cv::imwrite(pathToImage +  "cv_test.jpg", mat);
 
     
 
